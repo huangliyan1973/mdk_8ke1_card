@@ -24,6 +24,8 @@
 #include "usart.h"
 #include "gpio.h"
 #include "fsmc.h"
+#include "sram.h"
+#include "8ke1_debug.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -54,6 +56,29 @@ extern void init_eeprom(void);
 void SystemClock_Config(void);
 void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
+struct test {
+    uint8_t id1;
+    uint32_t id2;
+    uint16_t id3;
+    uint8_t  id_array[1024];
+  };
+
+static void test_sram(void)
+{
+  
+  struct test *test_st = (struct test *)(0x68000000);
+
+  test_st->id1 = 1;
+  test_st->id2 = 2;
+  test_st->id3 = 3;
+  for (int i = 0; i < 1024; i++)
+  {
+    test_st->id_array[i] = i;
+  }
+
+  CARD_DEBUGF(1, ("id1=%"U16_F"id2=%"U16_F"id3=%"U16_F"id4=%"U16_F"\n",
+                test_st->id1,test_st->id2, test_st->id3,test_st->id_array[1023]));
+}
 
 /* USER CODE END PFP */
 
@@ -95,6 +120,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   card_id = 0;
   init_eeprom();
+  test_sram();
   /* USER CODE END 2 */
 
   /* Init scheduler */

@@ -2,6 +2,8 @@
 #ifndef INC_8KE1_DEBUG_H_
 #define INC_8KE1_DEBUG_H_
 
+#include "lwip/arch.h"
+
 #define NET_DEBUG
 
 #define CARD_PLATFORM_ASSERT(x)  do { printf("Assertion \"%s\" failed at line %d in %s\n", \
@@ -38,5 +40,6 @@
 #endif
                 
 
-#endif /* INC_8KE1_DEBUG_H_ */
+#endif
+                                    
                                     
