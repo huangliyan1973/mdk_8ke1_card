@@ -1,7 +1,10 @@
 #ifndef INC_EEPROM_H_
 #define INC_EEPROM_H_
 
+#include "lwip/arch.h"
+
 #define E1_CARDS      16
+#define E1_PORT_PER_CARD	8
 /*port type */
 #define SS7_PORT      0
 #define ISDN_PORT     1
@@ -16,40 +19,41 @@
 #define NO1_DISABLE     0
 
 typedef struct {
-	uint8_t	e1_enable[E1_CARDS];
-	uint8_t	e1_l2_alarm_enable[E1_CARDS];
-	uint8_t	e1_port_type[E1_CARDS];
-	uint8_t	isdn_port_type[E1_CARDS];
-	uint8_t	pll_src[E1_CARDS];
-	uint8_t crc4_enable[E1_CARDS];
-	uint8_t no1_enable[E1_CARDS];
-    uint8_t mtp2_error_check[E1_CARDS];
+	u8_t	e1_enable[E1_CARDS];
+	u8_t	e1_l2_alarm_enable[E1_CARDS];
+	u8_t	e1_port_type[E1_CARDS];
+	u8_t	isdn_port_type[E1_CARDS];
+	u8_t	pll_src[E1_CARDS];
+	u8_t 	crc4_enable[E1_CARDS];
+	u8_t 	no1_enable[E1_CARDS];
+    u8_t 	mtp2_error_check[E1_CARDS];
 
-	uint8_t tone_cadence0[18];
-	uint8_t tone_cadence1[18];
-	uint8_t tone_cadence2[18];
-	uint8_t tone_cadence3[18];
-	uint8_t tone_cadence4[18];
-	uint8_t tone_cadence5[18];
-	uint8_t tone_cadence6[18];
-	uint8_t tone_cadence7[18];
+	u8_t 	tone_cadence0[18];
+	u8_t 	tone_cadence1[18];
+	u8_t 	tone_cadence2[18];
+	u8_t 	tone_cadence3[18];
+	u8_t 	tone_cadence4[18];
+	u8_t 	tone_cadence5[18];
+	u8_t 	tone_cadence6[18];
+	u8_t 	tone_cadence7[18];
 
-	uint8_t reason_to_tone[16];
-	uint8_t dtmf_mark_space[2];
-	uint8_t tone_src;
+	u8_t 	reason_to_tone[16];
+	u8_t 	dtmf_mark_space[2];
+	u8_t 	tone_src;
     
     struct {
-        uint8_t type;
-        uint8_t pc1[3];
-        uint8_t pc2[3];      
-    }pc_magic[8];
+        u8_t type;
+        u8_t pc1[3];
+        u8_t pc2[3];      
+    }pc_magic[E1_PORT_PER_CARD];
     
-    uint32_t version;
+    u32_t version;
 } e1_params_t;
 
 
 typedef struct {
-    uint8_t init;
+    u8_t init;
+    u32_t timestamp;
     
 }ram_params_t;
 

@@ -12,10 +12,10 @@
 #define CARD_PLATFORM_DIAG(x)  do { printf x; } while(0)
 
 #ifndef CARD_NOASSERT
-    #define CARD_ASSERT(message, assertion) do { if (!(assertion)) { \
+#define CARD_ASSERT(message, assertion) do { if (!(assertion)) { \
                 CARD_PLATFORM_ASSERT(message); }} while(0)
 #else /* CARD_NOASSERT */
-    #define CARD_ASSERT(message, assertion)
+#define CARD_ASSERT(message, assertion)
 #endif
                 
 #ifndef CARD_ERROR
@@ -39,7 +39,5 @@
 #define CARD_DEBUGF(debug, message)
 #endif
                 
-
-#endif
-                                    
+#endif /* INC_8KE1_DEBUG_H_ */
                                     
