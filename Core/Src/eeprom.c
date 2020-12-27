@@ -12,6 +12,7 @@
 #include "main.h"
 #include "eeprom.h"
 #include "8ke1_debug.h"
+#include "mtp.h"
 
 #define   E1_CARD_VERSION   0x1
 #define   FLASH_DEBUG

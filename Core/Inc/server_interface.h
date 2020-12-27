@@ -4,6 +4,8 @@
 #include "lwip/ip_addr.h"
 #include "lwip/arch.h"
 
+#define  MSG_DEBUG
+
 #define  SS7_UDP_PORT		4950
 #define	 ISDN_UDP_PORT		4951
 #define  SNMP_UDP_PORT		4957
@@ -18,7 +20,7 @@ typedef struct {
 	u32_t	    msgBroadcast;
 	u16_t	    msgLens;
 
-	u8_t		*msgContents;
+	u8_t		msgContents[1];
 }__attribute__ ((packed)) udpMsg_t;
 
 #define MTP2_ACTIVE_LINK	1
@@ -39,12 +41,12 @@ typedef struct {
 			u8_t		crLens;		/* Call Reference Length */
 			u8_t		callRef[2]; /* Call Reference */
 			u8_t		msgType;
-			u8_t		*msgContents;
+			u8_t		msgContents[1];
 		}__attribute__ ((packed)) isdnMsg;
 
 		struct {
 			u8_t 	    sio;		/* 0,1 = test  3 = isup, 4 = tup, 5 = sccp */
-			u8_t		*msgContents;
+			u8_t		msgContents[1];
 		}__attribute__ ((packed)) ss7Msg;
 
 		struct {
@@ -78,7 +80,7 @@ typedef struct {
 	u8_t		dstSlot;
 	u8_t		commandType;
 	u8_t		digit;
-	u8_t		*other;
+	u8_t		other[1];
 
 }__attribute__ ((packed)) commandMsg_t;
 

@@ -453,6 +453,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\Src\server_if.c</FilePath>
             </File>
+            <File>
+              <FileName>mtp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\mtp.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

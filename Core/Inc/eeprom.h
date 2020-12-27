@@ -8,9 +8,6 @@
 /*port type */
 #define SS7_PORT      0
 #define ISDN_PORT     1
-/*isdn port type */
-#define PRI_CPE        0
-#define PRI_NETWORK    1
 /*CRC4 */
 #define CRC4_DISABLE    0
 #define CRC4_ENABLE     1
