@@ -45,8 +45,6 @@ struct zl50020_dev {
 	vu16	brlr[32];	/* 0x320-0x33F BER Receiver Length Registers 0 - 31  */
 	vu16	brcr[32];	/* 0x340-0x35F BER Receiver Control Registers 0 - 31 */
 	vu16	brer[32];	/* 0x360-0x37F BER Receiver Error Registers 0 - 31 */
-};
-
-
+}__attribute__ ((packed));
 
 #endif /* INC_ZL50020_H_ */

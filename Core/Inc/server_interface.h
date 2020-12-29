@@ -11,7 +11,26 @@
 #define  SNMP_UDP_PORT		4957
 #define  OTHER_UDP_PORT		4952
 
-typedef struct {
+#define  OTHER_SIO			0x87
+#define  MTP2_COMMAND_SIO   0xFF
+
+struct ss7_head {
+	u8_t		e1_no;
+	u8_t		len;
+	u8_t		sio;
+	u8_t		msg[1];
+}__attribute__ ((packed));
+
+struct mapb_head {
+	u8_t		msu_len;
+	u8_t		reserved;
+	u8_t		sio;
+	u8_t		dst_ref[3];
+	u8_t		org_ref[3];
+	u8_t		msg_type;
+}__attribute__ ((packed));
+
+struct ip_head {
 	u8_t		msgCreatedTime[15];
 	u32_t	    msgSrcIp;
 	u16_t	    msgSrcPort;
@@ -19,9 +38,61 @@ typedef struct {
 	u16_t 	    msgDstPort;
 	u32_t	    msgBroadcast;
 	u16_t	    msgLens;
+}__attribute__ ((packed));
 
-	u8_t		msgContents[1];
-}__attribute__ ((packed)) udpMsg_t;
+/* Receive from msc port: 4950 */
+struct other_msg {
+	struct ip_head		ip_head;
+	struct mapb_head	m_head;
+	u8_t				src_slot;
+	u8_t				dst_id;
+	u8_t				dst_slot;
+	u8_t				tone_no;
+	u8_t				playtimes;
+}__attribute__ ((packed));
+
+/* Send to msc port :4952 */
+struct msc_msg {
+	struct ip_head		ip_head;
+	struct mapb_head	m_head;
+	u8_t				src_slot;
+	u8_t				dst_id;
+	u8_t				dst_slot;
+	u8_t				decode_type;
+	u8_t				digit;
+	u8_t				other[1];
+}__attribute__ ((packed));
+
+/* Send/Receive to/from msc  port : 4950 */ 
+struct ss7_msg {
+	struct ip_head 		ip_head;
+	struct ss7_head 	msg;
+}__attribute__ ((packed));
+
+/* Send to msc port : 4951 */ 
+struct isdn_msg {
+	struct ip_head		ip_head;
+	u8_t				e1_no;
+	u8_t				msg_len;
+	union{
+		struct{   
+			u8_t    pd;                     /* Protocol Discriminator */
+			u8_t    e1ip;                   /* E1_IP - 32 */
+			u8_t    primi;                  /* Primitive Type */
+		}__attribute__ ((packed)) primimsg;
+
+		struct{
+			u8_t    pd;                     /* Protocol Discriminator */
+			u8_t    cr_len;                 /* Call Reference Length */
+			u8_t    callref[2];             /* Call Reference */
+			u8_t    msgtype;                /* Message Type */
+			u8_t    l3content[1];         /* L3 Message Content */
+		}__attribute__ ((packed)) l3msg;
+	}__attribute__ ((packed)) msg;
+
+}__attribute__ ((packed));
+
+
 
 #define MTP2_ACTIVE_LINK	1
 #define MTP2_DEACTIVE_LINK	2
@@ -31,33 +102,6 @@ typedef struct {
 #define SIGNAL_TOP			7
 #define ISDN_PD				8
 
-typedef struct {
-	u8_t linkNo;
-	u8_t msgLens;
-
-	union{
-		struct {
-			u8_t		pd;   		/* Protocol Discriminator */
-			u8_t		crLens;		/* Call Reference Length */
-			u8_t		callRef[2]; /* Call Reference */
-			u8_t		msgType;
-			u8_t		msgContents[1];
-		}__attribute__ ((packed)) isdnMsg;
-
-		struct {
-			u8_t 	    sio;		/* 0,1 = test  3 = isup, 4 = tup, 5 = sccp */
-			u8_t		msgContents[1];
-		}__attribute__ ((packed)) ss7Msg;
-
-		struct {
-			u8_t		flag;      /* = 0xff */
-			u8_t		platId;
-			u8_t		mtp2Command;
-		}__attribute__ ((packed)) mtp2Msg;
-	}__attribute__ ((packed)) msg;
-
-}__attribute__ ((packed)) signalMsg_t;
-
 
 #define CON_TIME_SLOT       0
 #define CON_TONE            2
@@ -66,23 +110,6 @@ typedef struct {
 #define CON_DISC_GRP        5
 #define CON_DEC_DTMF        7
 #define CON_DEC_MFC     	9
-
-typedef struct {
-	u8_t		msgLens;
-	u8_t		reserved;
-	u8_t		sio;
-	u8_t		dstRef[3];
-	u8_t		srcRef[3];
-	u8_t		msgType;
-
-	u8_t		srcSlot;
-	u8_t		dstId;
-	u8_t		dstSlot;
-	u8_t		commandType;
-	u8_t		digit;
-	u8_t		other[1];
-
-}__attribute__ ((packed)) commandMsg_t;
 
 
 /*heartbeat struct */
@@ -122,5 +149,11 @@ extern ip4_addr_t  sn1;
 extern ip4_addr_t  omc;
 
 #define plat_no		((card_id >> 4) & 1)
+
+extern void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len);
+
+extern void send_other_msg(struct other_msg *msg, u8_t len);
+
+extern void server_interface_init(void);
 
 #endif /* INC_CSU_IF_H_ */

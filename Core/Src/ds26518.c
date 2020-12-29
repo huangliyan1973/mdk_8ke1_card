@@ -30,7 +30,7 @@ static void delay_us(void)
 	FRAMER *f = ds26518_global_framer();
 	UC i = f->idr;
 
-	for(i=0; i < i + 6; i++){
+	for(i=0; i < 10; i++){
 		;
 	}
 }
@@ -102,6 +102,7 @@ void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 	} else {
 		*val = (*val) | mask;
 	}
+	CARD_DEBUGF(MTP_DEBUG, ("tcice value = %04X\n", *val));
 }
 
 

@@ -458,6 +458,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\Src\mtp.c</FilePath>
             </File>
+            <File>
+              <FileName>zl50020.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\zl50020.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

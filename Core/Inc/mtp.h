@@ -7,6 +7,12 @@
 #define E1_LINKS_MAX			8
 #define MTP_MBOX_SIZE 			6
 
+#define MTP2_ACTIVE_LINK    	1
+#define MTP2_DEACTIVE_LINK  	2
+#define MTP2_STOP_L2        	3	
+#define MTP2_EMERGEN_ALIGNMENT  4
+
+
 #define SS7_PROTO_ISUP          5
 #define SS7_PROTO_TUP           4
 #define SS7_PROTO_SCCP          3
@@ -306,7 +312,9 @@ extern void mtp_cleanup(void);
 
 extern mtp2_t *get_mtp2_state(u8_t link_no);
 
-extern void mtp2_queue_msu(mtp2_t *m, u8_t sio, u8_t *sif, int len);
+extern void mtp2_queue_msu(u8_t e1_no, u8_t sio, u8_t *sif, int len);
+
+extern void mtp2_command(u8_t e1_no, u8_t command);
 
 extern void q921_start(mtp2_t *m);
 

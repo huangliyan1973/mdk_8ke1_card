@@ -399,7 +399,7 @@ static snmp_err_t snmp_get_value(struct snmp_varbind *vb)
             break;
         case 3:  /* Command */
             if (sub_oid == 1) {
-                vb->value = (void *)&ram_params.init;
+                vb->value = (void *)&ram_params.init_flag;
                 vb->value_len = 1;
             } else {
                 return SNMP_ERR_NOSUCHINSTANCE;
@@ -469,7 +469,7 @@ static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
             break;
         case 3: /*command */
             if (sub_oid == 1) {
-                ram_params.init = value;
+                ram_params.init_flag = value;
                 /* Todo: 重启或EEPROM初始化 */
             } else {
                 return SNMP_ERR_NOSUCHINSTANCE;

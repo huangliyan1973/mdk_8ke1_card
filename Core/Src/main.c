@@ -26,6 +26,7 @@
 #include "fsmc.h"
 #include "sram.h"
 #include "8ke1_debug.h"
+#include "ip4_addr.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -78,6 +79,19 @@ static void test_sram(void)
 
   CARD_DEBUGF(1, ("id1=%"U16_F"id2=%"U16_F"id3=%"U16_F"id4=%"U16_F"\n",
                 test_st->id1,test_st->id2, test_st->id3,test_st->id_array[1023]));
+
+  u16_t  t1 = 0x1234;
+  u8_t  *t8 = (u8_t *)&t1;
+  CARD_DEBUGF(1, ("t8_1 = %x, t8_2 = %x\n", t8[0], t8[1]));
+  
+  ip4_addr_t t_addr;
+  IP4_ADDR(&t_addr, 172, 18, 98, 1);
+  u32_t addr = t_addr.addr;
+  CARD_DEBUGF(1, ("addr = %X\n", addr));
+  
+  t8 = (u8_t *)&addr;
+  CARD_DEBUGF(1, ("t8_1 = %x, t8_2 = %x, t8_3 = %x, t8_4 = %x\n", t8[0], t8[1], t8[2], t8[3]));
+  
 }
 
 /* USER CODE END PFP */

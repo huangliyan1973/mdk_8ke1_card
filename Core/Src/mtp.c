@@ -253,12 +253,13 @@ mtp2_pick_frame(mtp2_t *m)
 }
 
 /* Queue an MSU (in the retransmit buffer) for sending down the link. */
-void mtp2_queue_msu(mtp2_t *m, u8_t sio, u8_t *sif, int len)
+void mtp2_queue_msu(u8_t e1_no, u8_t sio, u8_t *sif, int len)
 {
 	int i;
+    mtp2_t *m = &mtp2_state[e1_no];
 
-	if (m->state != MTP2_INSERVICE)
-	{
+    if (m->state != MTP2_INSERVICE)
+    {
 		if (m->state != MTP2_READY)
 		{
 			CARD_DEBUGF(MTP_DEBUG, ("ERROR ! Got MSU (sio=%d), but link not in service, discarding on link '%d'.\n", sio, m->e1_no));
@@ -570,6 +571,7 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
         }
 #endif
         //process_msu(m, buf, len);
+        send_ss7_msg(m->e1_no, &buf[3], len - 3);
     }
 }
 
@@ -590,7 +592,8 @@ static void mtp2_read_su(mtp2_t *m, u8_t *buf, int len)
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	if (GPIO_Pin == GPIO_PIN_7){
+    /* PA5 for DS26518 INTERRUPT */
+	if (GPIO_Pin == GPIO_PIN_5){
 		//ds26518_isr();
 	}
 }
@@ -653,14 +656,14 @@ mtp2_t *get_mtp2_state(u8_t link_no)
     return &mtp2_state[link_no];
 }
 
-static void mtp_thread_handle_msg(udpMsg_t *msg)
+static void mtp_thread_handle_msg(struct ss7_msg *msg)
 {
 
 }
 
 static void mtp2_thread(void *arg)
 {
-    udpMsg_t *msg;
+    struct ss7_msg *msg;
     LWIP_UNUSED_ARG(arg);
 
     ds26518_global_init();
@@ -694,4 +697,25 @@ void mtp_init(void)
     }
 
     sys_thread_new("mtp2", mtp2_thread, NULL, DEFAULT_THREAD_STACKSIZE, osPriorityNormal);
+}
+
+void mtp2_command(u8_t e1_no, u8_t command)
+{
+    mtp2_t *m = &mtp2_state[e1_no];
+
+    switch (command) {
+        case MTP2_ACTIVE_LINK:
+            start_initial_alignment(m, "User start!");
+            break;
+        case MTP2_DEACTIVE_LINK:
+            abort_initial_alignment(m);
+            break;
+        case MTP2_STOP_L2:
+            abort_initial_alignment(m);
+            m->state = MTP2_DOWN;
+            break;
+        case MTP2_EMERGEN_ALIGNMENT:
+            start_initial_alignment(m, "Emergen start");
+            break;
+    }
 }

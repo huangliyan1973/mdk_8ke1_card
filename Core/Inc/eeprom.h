@@ -47,12 +47,24 @@ typedef struct {
     u32_t version;
 } e1_params_t;
 
+typedef struct {
+	u8_t 	init_flag;
+	u8_t 	led_status[8];
+	u8_t 	e1_l1_alarm;
+	u8_t 	e1_l2_alarm;
+	u8_t 	cpu_loading;
+	u8_t 	loopback_flag[8];
+	u32_t 		timestamp;
+} ram_params_t;
 
 typedef struct {
-    u8_t init;
-    u32_t timestamp;
-    
-}ram_params_t;
+	u8_t 	conf_grp;
+	u8_t 	first_abcd;
+	u8_t 	chk_times;
+	u8_t 	ls_in;
+	u8_t 	old_mfc_par;
+	u8_t 	mfc_value;
+} slot_t;
 
 extern e1_params_t	e1_params;
 extern ram_params_t ram_params;
