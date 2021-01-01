@@ -154,6 +154,8 @@ extern void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len);
 
 extern void send_other_msg(struct other_msg *msg, u8_t len);
 
+extern void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len);
+
 extern void server_interface_init(void);
 
 #endif /* INC_CSU_IF_H_ */

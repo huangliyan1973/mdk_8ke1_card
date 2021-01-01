@@ -322,9 +322,9 @@ extern int q921_receive(mtp2_t *m, q921_h *h, int len);
 
 extern void q921_pick_frame(mtp2_t *m);
 
-extern int q921_transmit_iframe(mtp2_t *m, void *buf, int len /*, int cr*/);
+extern int q921_transmit_iframe(u8_t e1_no, void *buf, int len /*, int cr*/);
 
-extern int q921_transmit_uiframe(mtp2_t *m, void *buf, int len);
+extern int q921_transmit_uiframe(u8_t e1_no, void *buf, int len);
 
 extern void send_ccs_msg(u8_t e1_no, u8_t send_len);
 

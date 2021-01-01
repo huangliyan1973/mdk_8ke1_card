@@ -17,7 +17,7 @@ static struct netconn *ss7_conn;
 static struct netconn *isdn_conn;
 //static struct netconn *other_conn;
 
-static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *src_addr)
+static void other_receive(u8_t e1_no, struct pbuf *p, const ip_addr_t *src_addr)
 {
     struct other_msg  *ot_msg = (struct other_msg *)p->payload;
     
@@ -74,12 +74,29 @@ static void isdn_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *
 {
     LWIP_UNUSED_ARG(conn);
 
-    struct isdn_msg *rev_msg = (struct isdn_msg *)p->payload;
+    //u8_t buf[512];
+    struct isdn_msg *isdnmsg = (struct isdn_msg *)p->payload;
     
-    uint8_t pd = rev_msg->msg.l3msg.pd;
+    u8_t pd = isdnmsg->msg.l3msg.pd;
+    u8_t e1_no = isdnmsg->e1_no;
+
+    if ((e1_no >> 3) != card_id) {
+        CARD_DEBUGF(MSG_DEBUG, ("out of isdn msg range e1_no = %d, card_id = %d\n", e1_no, card_id));
+        return;
+    }
 
     if (pd == ISDN_PD) {
-
+#if 0
+        memset(buf, 0, 512);
+        buf[0] = isdnmsg->msg.l3msg.pd;
+        buf[1] = isdnmsg->msg.l3msg.cr_len;
+        buf[2] = isdnmsg->msg.l3msg.callref[0];
+        buf[3] = isdnmsg->msg.l3msg.callref[1];
+        buf[4] = isdnmsg->msg.l3msg.msgtype;
+        memcpy(&buf[5], isdnmsg->msg.l3msg.l3content, isdnmsg->msg_len -5);
+        q921_transmit_iframe(e1_no & 0x7, buf, isdnmsg->msg_len);
+#endif
+        q921_transmit_iframe(e1_no & 0x7, (void *)&isdnmsg->msg.l3msg.pd, isdnmsg->msg_len);
     }
 }
 
@@ -118,7 +135,7 @@ static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *s
 
     if (sio == OTHER_SIO) {
         /* other command for 8KE1 */
-        other_receive(conn, p, src_addr);
+        other_receive(e1_no & 0x7, p, src_addr);
     } else if (sio == MTP2_COMMAND_SIO) {
         /* MTP2 command */
         if ((e1_no >> 3) != card_id) {
@@ -255,6 +272,48 @@ void send_other_msg(struct other_msg *msg, u8_t len)
 
     if (netconn_sendto(ss7_conn, net_buf, dst_addr, OTHER_UDP_PORT) != ERR_OK) {
         CARD_DEBUGF(MSG_DEBUG, ("send other msg failed.\n"));
+    }
+
+    netbuf_delete(net_buf);
+}
+
+void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len)
+{
+    ip4_addr_t  local_addr;
+    u16_t  local_port;
+    const ip4_addr_t *dst_addr;
+
+    struct netbuf *net_buf = netbuf_new();
+    u16_t tot_len = sizeof(struct isdn_msg) + len - 3;
+
+    struct isdn_msg *isdnmsg = (struct isdn_msg *)netbuf_alloc(net_buf, tot_len);
+    if (isdnmsg == NULL) {
+        CARD_DEBUGF(MSG_DEBUG, ("failed to alloc mem for isdn_msg\n"));
+        return;
+    }
+    
+    netconn_getaddr(isdn_conn, &local_addr, &local_port, 1);
+    if (plat_no) {
+        isdnmsg->ip_head.msgDstIp = sn1.addr;
+        dst_addr = &sn1;
+    } else {
+        isdnmsg->ip_head.msgDstIp = sn0.addr;
+        dst_addr = &sn0;
+    }
+    isdnmsg->ip_head.msgSrcIp = local_addr.addr;
+    isdnmsg->ip_head.msgSrcPort = ISDN_UDP_PORT;
+
+    isdnmsg->ip_head.msgDstPort = ISDN_UDP_PORT;
+    isdnmsg->ip_head.msgBroadcast = 0;
+    isdnmsg->ip_head.msgLens = len + 2;
+
+    isdnmsg->e1_no = link_no + (card_id << 3);
+    isdnmsg->msg_len = len;
+
+    memcpy((void *)&isdnmsg->msg.l3msg.pd, (void *)buf, len);
+
+    if (netconn_sendto(isdn_conn, net_buf, dst_addr, ISDN_UDP_PORT) != ERR_OK) {
+        CARD_DEBUGF(MSG_DEBUG, ("send isdn msg failed.\n"));
     }
 
     netbuf_delete(net_buf);

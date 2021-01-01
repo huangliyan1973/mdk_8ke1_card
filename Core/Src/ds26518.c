@@ -644,7 +644,16 @@ void ds26519_isr(void)
 
 		if (liu_isr_st & ( 1 << index)) {
 			LIU *l = ds26518_liu(index);
+			u8_t llsr = l->llsr;
+/* 		Bit6: Open-Circuit Clear (OCC). This latched bit is set when an open circuit condition was detected at TTIPn and TRINGn and then removed
+		Bit5: Short-Circuit Clear (SCC). This latched bit is set when a short circuit condition was detected at TTIPn and TRINGn and then removed
+		Bit4: Loss of Signal Clear (LOSC). This latched bit is set when a loss of signal condition was detected at RTIPn and RRINGn and then removed.
+		Bit 2: Open-Circuit Detect (OCD). This latched bit is set when open-circuit condition is detected at TTIPn and TRINGn
+		Bit 1: Short-Circuit Detect (SCD). This latched bit is set when short-circuit condition is detected at TTIPn and TRINGn
+		Bit 0: Loss of Signal Detect (LOSD). This latched bit is set when an LOS condition is detected at RTIPn and RRINGn  */ 
+			
 
+			l->llsr = llsr;
 		}
 	}
 }

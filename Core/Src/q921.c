@@ -839,9 +839,10 @@ static int q921_mdl_receive(mtp2_t *m, q921_u *h, int len)
 }
 
 /* This is the equivalent of a DL-DATA request, as well as the I-frame queued up outcome */
-int q921_transmit_iframe(mtp2_t *m, void *buf, int len /*, int cr*/)
+int q921_transmit_iframe(u8_t e1_no, void *buf, int len /*, int cr*/)
 {
 	q921_i iframe;
+	mtp2_t *m = get_mtp2_state(e1_no);
 
 	/* Figure B.7/Q.921 Page 70 */
 	switch (m->q921_state) {
@@ -909,10 +910,11 @@ int q921_transmit_iframe(mtp2_t *m, void *buf, int len /*, int cr*/)
 }
 
 /* This is sending a DL-UNIT-DATA request */
-int q921_transmit_uiframe(mtp2_t *m, void *buf, int len)
+int q921_transmit_uiframe(u8_t e1_no, void *buf, int len)
 {
 	uint8_t ubuf[512];
 	q921_h *h = (void *)&ubuf[0];
+	mtp2_t *m = get_mtp2_state(e1_no);
 
 	if (len >= 512) {
 		CARD_DEBUGF(MTP_DEBUG, ("Requested to send UI-frame larger than 512 bytes!\n"));
@@ -1944,8 +1946,9 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 			/* Q.921 has finished processing the frame so we can give it to Q.931 now. */
 			/* XXX */
 #if 0
-			res = q931_receive(m, (q931_h *) h->i.data, len - 2);
+			res = q931_receive(m, (q931_h *) h->i.data, len - 4);
 #endif
+			send_isdn_msg(m->e1_no, (u8_t *)h->i.data, len - 4);
 			/*
 			if (res != -1 && (res & Q931_RES_HAVEEVENT)) {
 				eres = &ctrl->ev;
