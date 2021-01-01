@@ -1,6 +1,8 @@
 #ifndef DS26518_H
 #define DS26518_H
 
+#include "lwip/sys.h"
+
 typedef volatile unsigned char VUC;
 typedef unsigned char UC;
 
@@ -1391,5 +1393,7 @@ extern void disable_e1_transmit(int e1_no);
 extern void enable_e1_transmit(int e1_no);
 extern void set_ds26518_loopback(int e1_no, enum LOOPBACK_TYPE lp_type);
 extern void ds26518_isr(void);
+
+void ds26518_tx_set(u8_t e1_no, u8_t *buf, u8_t len, u8_t end_flag);
 
 #endif /* Build for Specific Driver */

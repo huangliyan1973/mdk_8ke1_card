@@ -463,6 +463,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\Src\zl50020.c</FilePath>
             </File>
+            <File>
+              <FileName>q921.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\q921.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

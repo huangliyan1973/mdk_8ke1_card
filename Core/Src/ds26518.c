@@ -12,6 +12,8 @@
 #include "main.h"
 #include "usart.h"
 #include "8ke1_debug.h"
+#include "mtp.h"
+#include "lwip/sys.h"
 
 /* FSMC_NE2 for ds26518 */
 #define DS26518_BASE			(0x64000000)
@@ -565,6 +567,85 @@ void set_ds26518_loopback(int e1_no, enum LOOPBACK_TYPE lp_type)
 		f->rcr3 |= 0x2;
 	default:
 		break;
+	}
+}
+
+void ds26518_tx_set(u8_t e1_no, u8_t *buf, u8_t len, u8_t end_flag)
+{
+	u8_t i;
+	FRAMER *f = ds26518_framer(e1_no);
+
+	for (i = 0; i < len - 1; i++) {
+		f->thf = buf[i];
+	}
+
+	if (end_flag == 1) {
+		// Last Byte to Send.
+		f->thc1 |= THC1_TEOM; // bit2 of thc1 TEOM
+	}
+	f->thf = buf[i];
+}
+
+void ds26519_isr(void)
+{
+	u8_t index;
+	FRAMER *f = ds26518_global_framer();
+
+	u8_t frame_isr_st = f->gfisr1;
+	u8_t liu_isr_st = f->glisr1;
+
+	for (index = 0; index < E1_LINKS_MAX; index++) {
+		if (frame_isr_st & (1 << index)) {
+			f = ds26518_framer(index);
+			u8_t tiir = f->tiir;			
+			if ( tiir & 2) {
+				u8_t tls2 = f->tls2;
+				if (tls2 & TLS2_TMEND || tls2 & TLS2_TLWMS) {
+
+					u8_t count = f->tfba;
+					if (count > 0) {
+
+						if(f->thc1 & THC1_TEOM){
+							f->thc1 &= (~THC1_TEOM);
+						}
+						send_ccs_msg(index, count);
+					}
+				}
+				f->tls2 = tls2;
+			}
+
+			u8_t riir = f->riir;
+			if (riir & 0x10) {  //RLS5
+				u8_t rls5 = f->rls5;
+				if (rls5 & RLS5_RNES || rls5 & RLS5_RHWMS) {
+					u8_t rv_status = f->rhpba;
+					u8_t rv_len = rv_status & 0x7F;
+
+					while (rv_len) {
+						rv_ccs_byte(index, f->rhf);
+						rv_len--;	
+					}				
+					//MS = 0, received last N bytes of message.
+					if ((rv_status & RHPBA_MS) == 0) { 
+						rv_status =  ((f->rrts5) >> 4) & 0x7;
+						if (rv_status == 1) {
+							/* Receive OK */
+							check_ccs_msg(index);
+						}  else if (rv_status == 0) {
+							continue;
+						} else {
+							/* Error */
+							bad_msg_rev(index, rv_status);
+						}
+					}
+				}
+			}
+		}
+
+		if (liu_isr_st & ( 1 << index)) {
+			LIU *l = ds26518_liu(index);
+
+		}
 	}
 }
 

@@ -283,18 +283,18 @@ typedef struct mtp2_state{
 	int t200_timer;
 	/*! Retry Count (T200) */
 	int RC;
-	int t201_timer;
-	int t202_timer;
+	//int t201_timer;
+	//int t202_timer;
 	int n202_counter;
 	/*! Max idle time */
-	int t203_timer;
+	//int t203_timer;
 	/*! Layer 2 persistence restart delay timer */
-	int restart_timer;
+	//int restart_timer;
 
 	int t201_expirycnt;
 
 	/* MDL variables */
-	int mdl_timer;
+	//int mdl_timer;
 	int mdl_error;
 	unsigned int mdl_free_me:1;
 
@@ -319,9 +319,20 @@ extern void mtp2_command(u8_t e1_no, u8_t command);
 extern void q921_start(mtp2_t *m);
 
 extern int q921_receive(mtp2_t *m, q921_h *h, int len);
+
 extern void q921_pick_frame(mtp2_t *m);
-extern int q921_transmit_iframe(mtp2_t *m, void *buf, int len, int cr);
+
+extern int q921_transmit_iframe(mtp2_t *m, void *buf, int len /*, int cr*/);
+
 extern int q921_transmit_uiframe(mtp2_t *m, void *buf, int len);
+
+extern void send_ccs_msg(u8_t e1_no, u8_t send_len);
+
+extern void rv_ccs_byte(u8_t e1_no, u8_t data);
+
+extern void check_ccs_msg(u8_t e1_no);
+
+extern void bad_msg_rev(u8_t e1_no, u8_t err);
 
 extern sys_mutex_t lock_mtp_core;
 #define LOCK_MTP2_CORE()	sys_mutex_lock(&lock_mtp_core)

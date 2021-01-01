@@ -642,7 +642,7 @@ void e1_port_init(int e1_no)
         }
     } else { /* china no.1 */
         ds26518_port_init(e1_no, CAS_TYPE);
-        
+        m->protocal = NO1_PROTO_TYPE;
     }
 }
 
@@ -718,4 +718,77 @@ void mtp2_command(u8_t e1_no, u8_t command)
             start_initial_alignment(m, "Emergen start");
             break;
     }
+}
+
+/* All below function called by ds26518 ISR routing procedure. */
+void send_ccs_msg(u8_t e1_no, u8_t send_len)
+{
+    mtp2_t *m = &mtp2_state[e1_no];
+
+    if (m->tx_len == 0) {
+        if (m->protocal == PRI_PROTO_TYPE) {
+            q921_pick_frame(m);
+        } else if (m->protocal == SS7_PROTO_TYPE) {
+            mtp2_pick_frame(m);
+        } else {
+            return;
+        }
+
+        if (m->tx_len == 0) {
+            return;
+        }
+    }
+
+    if (m->tx_len > send_len) {
+        ds26518_tx_set(e1_no, m->tx_buffer, send_len, 0);
+        m->tx_len -= send_len;
+
+        for(u8_t i = 0; i < m->tx_len; i++) {
+            m->tx_buffer[i] = m->tx_buffer[i + send_len];
+        }
+    } else {
+        ds26518_tx_set(e1_no, m->tx_buffer, m->tx_len, 1);
+        m->tx_len = 0; // Reset it for next pick.
+    }
+
+}
+
+void rv_ccs_byte(u8_t e1_no, u8_t data)
+{
+    mtp2_t *m = &mtp2_state[e1_no];
+
+    if (m->protocal == NO1_PROTO_TYPE ||
+        (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_DOWN) ||
+        (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_TEI_UNASSIGNED)) {
+        return;
+    }
+
+    m->rx_buf[m->rx_len++] = data;
+}
+
+void check_ccs_msg(u8_t e1_no)
+{
+    mtp2_t *m = &mtp2_state[e1_no];
+
+    if (m->protocal == SS7_PROTO_TYPE) {
+        /* Delete CRC16 2 byte */
+        mtp2_read_su(m, m->rx_buf, m->rx_len -2);
+    } else if (m->protocal == PRI_PROTO_TYPE) {
+        q921_receive(m, (q921_h *)m->rx_buf, m->rx_len - 2);
+    }
+
+    m->rx_len = 0;
+}
+
+void bad_msg_rev(u8_t e1_no, u8_t err)
+{
+    mtp2_t *m = &mtp2_state[e1_no];
+
+    m->rx_len = 0;
+
+    /* err list  
+     2: CRC Error.
+     3: Abort.
+     4: Overrun.
+    */
 }
