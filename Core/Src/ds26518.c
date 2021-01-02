@@ -588,7 +588,7 @@ void ds26518_tx_set(u8_t e1_no, u8_t *buf, u8_t len, u8_t end_flag)
 	f->thf = buf[i];
 }
 
-void ds26519_isr(void)
+void ds26518_isr(void)
 {
 	u8_t index;
 	FRAMER *f = ds26518_global_framer();

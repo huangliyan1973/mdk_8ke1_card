@@ -59,6 +59,10 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define DS26518_INT_Pin GPIO_PIN_5
+#define DS26518_INT_GPIO_Port GPIOA
+#define CLOCK_EN_Pin GPIO_PIN_7
+#define CLOCK_EN_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

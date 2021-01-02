@@ -594,7 +594,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     /* PA5 for DS26518 INTERRUPT */
 	if (GPIO_Pin == GPIO_PIN_5){
-		//ds26518_isr();
+		ds26518_isr();
 	}
 }
 

@@ -3,6 +3,8 @@
 
 #include "lwip/sys.h"
 
+/* STM32F407 PA5 connect to DS26518 INT pin */
+
 typedef volatile unsigned char VUC;
 typedef unsigned char UC;
 

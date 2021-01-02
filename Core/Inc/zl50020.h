@@ -11,6 +11,9 @@
 #include <stdint.h>
 #include "lwip/sys.h"
 
+/* STM32F407 PC7 pin connect with ZL50020 DTA_RDY pin */
+/* STM32F407 PB7 pin control the master clock input */
+
 #define TONE_E1			7
 #define TONE_SILENT 	31
 
