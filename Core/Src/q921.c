@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <errno.h>
 
 #include "lwip/sys.h"
 #include "main.h"
@@ -22,7 +21,7 @@
 #include "mtp.h"
 #include "eeprom.h"
 #include "server_interface.h"
-#include "8ke1_debug.h"
+#include "card_debug.h"
 
 #define MTP_DEBUG                1
 
@@ -115,12 +114,12 @@ static const char *q921_state2str(enum q921_state state)
 
 static void q921_setstate(mtp2_t *m, int newstate)
 {
-#if 0
+
 	CARD_DEBUGF(MTP_DEBUG, ("%d E1 Changing from state %d(%s) to %d(%s)\r\n",
 					m->e1_no, m->q921_state, q921_state2str(m->q921_state),
-					newstate, q921_state2str(newstate)));
-#endif
-	m->q921_state = newstate;
+					newstate, q921_state2str((enum q921_state)newstate)));
+
+	m->q921_state = (enum q921_state)newstate;
 }
 
 void q931_dl_event(mtp2_t *m, enum Q931_DL_EVENT event)
@@ -209,7 +208,7 @@ static void q921_transmit(mtp2_t *m, q921_h *h, int len)
 
 static void q921_mdl_send(mtp2_t *m, enum q921_tei_identity message, int ri, int ai, int iscommand)
 {
-	uint8_t  buf[10];
+	uint8_t  buf[20];
 
 	q921_u *f = (q921_u *)buf;
 
@@ -728,7 +727,7 @@ void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 			u8_t *action;
 
 			/* TEI management related */
-			type = q921_tei_mgmt2str(h->u.data[3]);
+			type = q921_tei_mgmt2str((enum q921_tei_identity)h->u.data[3]);
 			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c MDL Message: %d(%s)\r\n", m->e1_no,direction_tag, h->u.data[3], type));
 			ri = (h->u.data[1] << 8) | h->u.data[2];
 			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c Ri: %d\r\n", m->e1_no,direction_tag, ri));
@@ -760,7 +759,7 @@ static void q921_dump_pri(mtp2_t *m, char direction_tag)
 static void q921_mdl_ignore(mtp2_t *m, q921_u *h, const char *reason)
 {
 	CARD_DEBUGF(MTP_DEBUG, ("%d E1: Ignoring MDL message: %d(%s)  %s\n",
-		m->e1_no, h->data[3], q921_tei_mgmt2str(h->data[3]), reason));
+		m->e1_no, h->data[3], q921_tei_mgmt2str((enum q921_tei_identity)h->data[3]), reason));
 }
 
 static int q921_mdl_receive(mtp2_t *m, q921_u *h, int len)
@@ -784,12 +783,12 @@ static int q921_mdl_receive(mtp2_t *m, q921_u *h, int len)
 	if (h->data[3] != Q921_TEI_IDENTITY_CHECK_RESPONSE
 		&& !(h->data[4] & 0x01)) {
 		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Received MDL message: %d(%s) with Ai E bit not set.\r\n",
-			m->e1_no,h->data[3], q921_tei_mgmt2str(h->data[3])));
+			m->e1_no,h->data[3], q921_tei_mgmt2str((enum q921_tei_identity)h->data[3])));
 		return -1;
 	}
 
 	CARD_DEBUGF(MTP_DEBUG, ("%d E1: Received MDL message: %d(%s)\n",
-		m->e1_no, h->data[3], q921_tei_mgmt2str(h->data[3])));
+		m->e1_no, h->data[3], q921_tei_mgmt2str((enum q921_tei_identity)h->data[3])));
 
 	if (m->pri_mode == PRI_NETWORK) {
 		/*
@@ -841,6 +840,7 @@ static int q921_mdl_receive(mtp2_t *m, q921_u *h, int len)
 /* This is the equivalent of a DL-DATA request, as well as the I-frame queued up outcome */
 int q921_transmit_iframe(u8_t e1_no, void *buf, int len /*, int cr*/)
 {
+    int index;
 	q921_i iframe;
 	mtp2_t *m = get_mtp2_state(e1_no);
 
@@ -880,7 +880,7 @@ int q921_transmit_iframe(u8_t e1_no, void *buf, int len /*, int cr*/)
 		//f->len = len + 4;
 		//memcpy(i->h.data, buf, len);
 
-		int index = (m->retrans_last_sent + 1) % 128;
+		index = (m->retrans_last_sent + 1) % 128;
 		if(index == m->retrans_last_acked) {
 			CARD_DEBUGF(MTP_DEBUG, ("Q921 retransmit buffer full, we will lost on link '%d'.\r\n", m->e1_no));
 			break;

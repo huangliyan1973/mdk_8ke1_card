@@ -4,7 +4,7 @@
 #include "main.h"
 #include "cmsis_os.h"
 
-#include "8ke1_debug.h"
+#include "card_debug.h"
 #include "lwip/apps/snmp.h"
 #include "lwip/opt.h"
 #include "lwip/api.h"
@@ -17,6 +17,8 @@
 #include "usart.h"
 #include "eeprom.h"
 #include "server_interface.h"
+
+extern ip4_addr_t local_addr;
 
 static const u32_t  e1_oid_base[] = { 1, 3, 6, 1, 4, 1, 1373, 1, 3, 1, 1, 1 };
 static const u8_t   e1_oid_len = (u8_t)LWIP_ARRAYSIZE(e1_oid_base);
@@ -715,7 +717,7 @@ static void snmp_netconn_thread(void *arg)
   LWIP_UNUSED_ARG(arg);
 
   conn = netconn_new(NETCONN_UDP);
-  netconn_bind(conn, IP4_ADDR_ANY, SNMP_UDP_PORT);
+  netconn_bind(conn, IP_ADDR_ANY, SNMP_UDP_PORT);
 
   LWIP_ERROR("snmp_netconn: invalid conn", (conn != NULL), return;);
 

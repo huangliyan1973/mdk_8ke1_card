@@ -92,7 +92,12 @@ struct isdn_msg {
 
 }__attribute__ ((packed));
 
-
+union updmsg {
+	struct ss7_msg    ss7;
+	struct isdn_msg   isdn;
+	struct other_msg  other;
+	struct msc_msg    msc;
+}__attribute__ ((packed));
 
 #define MTP2_ACTIVE_LINK	1
 #define MTP2_DEACTIVE_LINK	2

@@ -9,6 +9,14 @@
 #define INC_ZL50020_H_
 
 #include <stdint.h>
+#include "lwip/sys.h"
+
+#define TONE_E1			7
+#define TONE_SILENT 	31
+
+#define TONE_STREAM 	2
+#define CONF_STREAM 	3
+#define MFC_STREAM 		4
 
 typedef volatile uint16_t  vu16;
 
@@ -46,5 +54,15 @@ struct zl50020_dev {
 	vu16	brcr[32];	/* 0x340-0x35F BER Receiver Control Registers 0 - 31 */
 	vu16	brer[32];	/* 0x360-0x37F BER Receiver Error Registers 0 - 31 */
 }__attribute__ ((packed));
+
+extern void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1);
+
+extern void connect_tone(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_stream);
+
+extern void m34116_conf_connect(u8_t p, u8_t gaini, u8_t ai, u8_t gaino, u8_t ao, u8_t c, u8_t s, u8_t pt);
+
+extern void m34116_disconnect(u8_t slot);
+
+extern void conf_module_detect(void);
 
 #endif /* INC_ZL50020_H_ */

@@ -56,7 +56,7 @@ osThreadAttr_t attributes;
 /* USER CODE END OS_THREAD_ATTR_CMSIS_RTOS_V2 */
 
 /* USER CODE BEGIN 2 */
-
+ip4_addr_t local_addr;
 /* USER CODE END 2 */
 
 /**
@@ -125,7 +125,7 @@ void MX_LWIP_Init(void)
 /* USER CODE END OS_THREAD_NEW_CMSIS_RTOS_V2 */
 
 /* USER CODE BEGIN 3 */
-
+  ip4_addr_copy(local_addr, ipaddr);
 /* USER CODE END 3 */
 }
 

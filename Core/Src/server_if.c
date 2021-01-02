@@ -10,32 +10,112 @@
 #include "main.h"
 #include "mtp.h"
 #include "eeprom.h"
-#include "8ke1_debug.h"
+#include "card_debug.h"
 #include "server_interface.h"
+#include "ds26518.h"
+#include "zl50020.h"
+
+extern ip4_addr_t local_addr;
 
 static struct netconn *ss7_conn;
 static struct netconn *isdn_conn;
 //static struct netconn *other_conn;
 
-static void other_receive(u8_t e1_no, struct pbuf *p, const ip_addr_t *src_addr)
+void send_ss7_test_msg(void);
+void send_isdn_test_msg(void);
+
+static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *src_addr)
 {
     struct other_msg  *ot_msg = (struct other_msg *)p->payload;
     
+    u8_t dst_port, dst_slot, src_port, src_slot;
+    u8_t toneno, group, old_group, i;
+
+    dst_port = ((ot_msg->dst_id & 0xF) << 3) | (ot_msg->dst_slot >> 5);
+    dst_slot = ot_msg->dst_slot & 0x1F;
+    src_port = ot_msg->src_slot >> 5;
+    src_slot = ot_msg->src_slot & 0x1F;
+
     switch (ot_msg->m_head.msg_type) {
         case CON_TIME_SLOT:
-            
+            ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);
+            if (dst_port == TONE_E1) {
+                connect_tone(src_slot, src_port, dst_slot, TONE_STREAM);
+            } else {
+                connect_slot(src_slot, src_port, dst_slot, dst_port);
+            }
             break;
         case CON_TONE:
+            //ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);
+            //connect_tone(src_slot, src_port, 0, TONE_STREAM);
+            toneno = e1_params.reason_to_tone[ot_msg->tone_no & 0x0F] & 0xF; /* tone0, tone1,...tone7 */
+            slot_params[ot_msg->src_slot].connect_tone_flag = (toneno << 4) + 1;
+            slot_params[ot_msg->src_slot].dmodule_ctone = ot_msg->dst_id; /* destination module when connect tone */
+            slot_params[ot_msg->src_slot].dslot_ctone = ot_msg->dst_slot; /* destination slot when connect tone */
+            slot_params[ot_msg->src_slot].connect_time = ot_msg->playtimes * 20;
             break;
         case CON_DTMF:
+            toneno = ot_msg->tone_no;
+            src_slot = ot_msg->src_slot;
+            slot_params[src_slot].connect_tone_flag = (toneno << 4) + 2;
+            slot_params[src_slot].dmodule_ctone = ot_msg->dst_id;
+            slot_params[src_slot].dslot_ctone = ot_msg->dst_slot;
+            slot_params[src_slot].dtmf_mark_delay = 39;
+            slot_params[src_slot].dtmf_space_delay = 19;
             break;
         case CON_CONN_GRP:
+            if (!ram_params.conf_module_installed) {
+                return;
+            }
+            group = ot_msg->tone_no % 81;
+            old_group = slot_params[ot_msg->src_slot].port_to_group;
+            if (old_group != IDLE) {
+                if (group_user[old_group] > 0) {
+                    group_user[old_group]--;
+                } else {
+                    group_user[old_group] = IDLE;
+                }
+                m34116_disconnect(ot_msg->src_slot);
+            }
+
+            slot_params[ot_msg->src_slot].port_to_group = group;
+            group_user[group]++;
+            if (group_user[group] == 1) {
+                m34116_conf_connect((group % 10) + 1, 0, 2, 0, 0, ot_msg->src_slot, 0, 0);
+            } else {
+                toneno = ((group_user[group] >> 2) * 3 + 2) & 0xF;
+                src_port = (src_port >> 5) << 5;
+                for (i = src_port; i < src_port + 32; i++) {
+                    if (slot_params[ot_msg->src_slot].port_to_group == group) {
+                        m34116_conf_connect((group % 10) + 1, 0, toneno, 1, 2, ot_msg->src_slot, 0, 0);
+                    }
+                }
+            }
             break;
         case CON_DISC_GRP:
+            group = ot_msg->tone_no % 80;
+            old_group = slot_params[ot_msg->src_slot].port_to_group;
+            if (old_group != IDLE) {
+                if (group_user[old_group] > 0) {
+                    group_user[old_group]--;
+                }
+            }
+            slot_params[ot_msg->src_slot].port_to_group = IDLE;
+            connect_tone(src_slot, src_port, TONE_SILENT, TONE_STREAM);
+            m34116_disconnect(ot_msg->src_slot);
             break;
         case CON_DEC_DTMF:
+            slot_params[ot_msg->src_slot].dmodule_ctone = ot_msg->dst_id; /* destination module when connect tone */
+            slot_params[ot_msg->src_slot].dslot_ctone = ot_msg->dst_slot; /* destination slot when connect tone */
+
+            if (ot_msg->tone_no & 1) {
+                /* Stop decode. */
+            } else {
+                /* Start decode */                
+            }
             break;
         case CON_DEC_MFC:
+            
             break;
         default:
             break;
@@ -109,11 +189,14 @@ static void isdn_netconn_thread(void *arg)
     LWIP_UNUSED_ARG(arg);
 
     conn = netconn_new(NETCONN_UDP);
-    netconn_bind(conn, IP4_ADDR_ANY, ISDN_UDP_PORT);
+    netconn_bind(conn, IP_ADDR_ANY, ISDN_UDP_PORT);
 
     CARD_ERROR("isdn_netconn: invalid conn", (conn != NULL), return;);
     isdn_conn = conn;
 
+    //for test.
+    send_isdn_test_msg();
+    
     do {
         err = netconn_recv(conn, &buf);
         if (err == ERR_OK){
@@ -135,7 +218,7 @@ static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *s
 
     if (sio == OTHER_SIO) {
         /* other command for 8KE1 */
-        other_receive(e1_no & 0x7, p, src_addr);
+        other_receive(conn, p, src_addr);
     } else if (sio == MTP2_COMMAND_SIO) {
         /* MTP2 command */
         if ((e1_no >> 3) != card_id) {
@@ -164,11 +247,13 @@ static void ss7_netconn_thread(void *arg)
   LWIP_UNUSED_ARG(arg);
 
   conn = netconn_new(NETCONN_UDP);
-  netconn_bind(conn, IP4_ADDR_ANY, SS7_UDP_PORT);
+  netconn_bind(conn, IP_ADDR_ANY, SS7_UDP_PORT);
 
   CARD_ERROR("ss7_netconn: invalid conn", (conn != NULL), return;);
   ss7_conn = conn;
 
+  //for test
+  send_ss7_test_msg();
   do {
     err = netconn_recv(conn, &buf);
 
@@ -191,11 +276,26 @@ void server_interface_init(void)
     //sys_thread_new("other_netconn", other_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
 }
 
+static void init_msg_ip_head(union updmsg *msg, ip4_addr_t *dst_addr, u16_t dst_port)
+{
+    if (plat_no) {
+        ip4_addr_copy(*dst_addr, sn1);
+    } else {
+        ip4_addr_copy(*dst_addr, sn0);
+    }
+
+    msg->ss7.ip_head.msgDstIp = dst_addr->addr;
+    msg->ss7.ip_head.msgSrcIp = local_addr.addr;
+
+    msg->ss7.ip_head.msgDstPort = PP_HTONS(dst_port);
+    msg->ss7.ip_head.msgSrcPort = PP_HTONS(dst_port);
+
+    msg->ss7.ip_head.msgBroadcast = 0;
+}
+
 void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len)
 {
-    ip4_addr_t  local_addr;
-    u16_t  local_port;
-    const ip4_addr_t *dst_addr;
+    ip4_addr_t dst_addr;
 
     struct netbuf *net_buf = netbuf_new();
     u16_t tot_len = sizeof(struct ss7_msg) + len + 3;
@@ -206,29 +306,16 @@ void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len)
         return;
     }
     
-    netconn_getaddr(ss7_conn, &local_addr, &local_port, 1);
-    //netconn_getaddr(ss7_conn, &remote_addr, &remote_port, 0);
+    init_msg_ip_head((union updmsg *)sig_msg, &dst_addr, SS7_UDP_PORT);
 
-    if (plat_no) {
-        sig_msg->ip_head.msgDstIp = sn1.addr;
-        dst_addr = &sn1;
-    } else {
-        sig_msg->ip_head.msgDstIp = sn0.addr;
-        dst_addr = &sn0;
-    }
-    sig_msg->ip_head.msgSrcIp = local_addr.addr;
-    sig_msg->ip_head.msgSrcPort = SS7_UDP_PORT;
-    //sig_msg->ip_head.msgDstIp = remote_addr.addr;
-    sig_msg->ip_head.msgDstPort = SS7_UDP_PORT;
-    sig_msg->ip_head.msgBroadcast = 0;
-    sig_msg->ip_head.msgLens = len + 2;
+    sig_msg->ip_head.msgLens = PP_HTONS(len + 2);
 
     sig_msg->msg.e1_no = link_no + (card_id << 3);
     sig_msg->msg.len = len;
     sig_msg->msg.sio = buf[0];
     memcpy(sig_msg->msg.msg, &buf[1], len);
 
-    if (netconn_sendto(ss7_conn, net_buf, dst_addr, SS7_UDP_PORT) != ERR_OK) {
+    if (netconn_sendto(ss7_conn, net_buf, &dst_addr, SS7_UDP_PORT) != ERR_OK) {
         CARD_DEBUGF(MSG_DEBUG, ("send ss7 msg failed.\n"));
     }
 
@@ -239,9 +326,7 @@ void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len)
 */
 void send_other_msg(struct other_msg *msg, u8_t len)
 {
-    ip4_addr_t local_addr;
-    u16_t local_port;
-    const ip4_addr_t *dst_addr;
+    ip4_addr_t dst_addr;
 
     struct netbuf *net_buf = netbuf_new();
     u16_t tot_len = sizeof(struct ip_head) + len;
@@ -253,24 +338,13 @@ void send_other_msg(struct other_msg *msg, u8_t len)
         return;
     }
 
-    netconn_getaddr(ss7_conn, &local_addr, &local_port, 1);
+    init_msg_ip_head((union updmsg *)send_msg, &dst_addr, OTHER_UDP_PORT);
 
-    send_msg->ip_head.msgSrcIp = local_addr.addr;
-    send_msg->ip_head.msgSrcPort = OTHER_UDP_PORT;
-    if (plat_no) {
-        send_msg->ip_head.msgDstIp = sn1.addr;
-        dst_addr = &sn1;
-    } else {
-        send_msg->ip_head.msgDstIp = sn0.addr;
-        dst_addr = &sn0;
-    }
-    send_msg->ip_head.msgDstPort = OTHER_UDP_PORT;
-    send_msg->ip_head.msgBroadcast = 0;
-    send_msg->ip_head.msgLens = msg->m_head.msu_len + 1;
+    send_msg->ip_head.msgLens = PP_HTONS(msg->m_head.msu_len + 1);
 
     memcpy((void *)&send_msg->m_head.msu_len, (void *)&msg->m_head.msu_len, len+1);
 
-    if (netconn_sendto(ss7_conn, net_buf, dst_addr, OTHER_UDP_PORT) != ERR_OK) {
+    if (netconn_sendto(ss7_conn, net_buf, &dst_addr, OTHER_UDP_PORT) != ERR_OK) {
         CARD_DEBUGF(MSG_DEBUG, ("send other msg failed.\n"));
     }
 
@@ -279,9 +353,7 @@ void send_other_msg(struct other_msg *msg, u8_t len)
 
 void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len)
 {
-    ip4_addr_t  local_addr;
-    u16_t  local_port;
-    const ip4_addr_t *dst_addr;
+    ip4_addr_t dst_addr;
 
     struct netbuf *net_buf = netbuf_new();
     u16_t tot_len = sizeof(struct isdn_msg) + len - 3;
@@ -292,29 +364,45 @@ void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len)
         return;
     }
     
-    netconn_getaddr(isdn_conn, &local_addr, &local_port, 1);
-    if (plat_no) {
-        isdnmsg->ip_head.msgDstIp = sn1.addr;
-        dst_addr = &sn1;
-    } else {
-        isdnmsg->ip_head.msgDstIp = sn0.addr;
-        dst_addr = &sn0;
-    }
-    isdnmsg->ip_head.msgSrcIp = local_addr.addr;
-    isdnmsg->ip_head.msgSrcPort = ISDN_UDP_PORT;
+    init_msg_ip_head((union updmsg *)isdnmsg, &dst_addr, ISDN_UDP_PORT);
 
-    isdnmsg->ip_head.msgDstPort = ISDN_UDP_PORT;
-    isdnmsg->ip_head.msgBroadcast = 0;
-    isdnmsg->ip_head.msgLens = len + 2;
+    isdnmsg->ip_head.msgLens = PP_HTONS(len + 2);
 
     isdnmsg->e1_no = link_no + (card_id << 3);
     isdnmsg->msg_len = len;
 
     memcpy((void *)&isdnmsg->msg.l3msg.pd, (void *)buf, len);
 
-    if (netconn_sendto(isdn_conn, net_buf, dst_addr, ISDN_UDP_PORT) != ERR_OK) {
+    if (netconn_sendto(isdn_conn, net_buf, &dst_addr, ISDN_UDP_PORT) != ERR_OK) {
         CARD_DEBUGF(MSG_DEBUG, ("send isdn msg failed.\n"));
     }
 
     netbuf_delete(net_buf);
 }
+
+void send_ss7_test_msg(void)
+{
+    u8_t test_buf[] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+    send_ss7_msg(3, test_buf, sizeof(test_buf)/test_buf[0]);
+    
+/*    
+    HAL_Delay(4);
+    struct other_msg t2_msg;
+    t2_msg.m_head.sio = 0x87;
+    t2_msg.m_head.msg_type = 0x3;
+    t2_msg.tone_no = 1;
+    t2_msg.dst_id = 2;
+    t2_msg.dst_slot = 3;
+    t2_msg.src_slot = 4;
+    t2_msg.playtimes = 20;
+    
+    send_other_msg(&t2_msg, sizeof(t2_msg));
+*/
+}
+
+void send_isdn_test_msg(void)
+{
+    u8_t test_buf[] = {1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+    send_isdn_msg(2, test_buf, sizeof(test_buf)/test_buf[0]);
+}
+

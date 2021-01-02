@@ -11,7 +11,7 @@
 #include "ds26518.h"
 #include "main.h"
 #include "usart.h"
-#include "8ke1_debug.h"
+#include "card_debug.h"
 #include "mtp.h"
 #include "lwip/sys.h"
 
@@ -49,11 +49,13 @@ static LIU *ds26518_liu(int e1_no)
 	return (LIU *)&dev->liu[e1_no];
 }
 
+#if 0
 static HDLC *ds26518_hdlc(int e1_no)
 {
 	DEVICE *dev = DS26518_DEVICE;
 	return (HDLC *)&dev->hdlc[e1_no];
 }
+#endif
 
 void set_ds26518_interrupt(int e1_no, int enable)
 {

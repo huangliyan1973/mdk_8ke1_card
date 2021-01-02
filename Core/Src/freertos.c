@@ -120,6 +120,7 @@ void StartDefaultTask(void *argument)
   /* USER CODE BEGIN StartDefaultTask */
   snmp_8ke1_init();
   server_interface_init();
+  
   for(;;)
   {
     osDelay(1);

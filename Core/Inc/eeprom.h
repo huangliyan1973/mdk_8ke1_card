@@ -5,6 +5,9 @@
 
 #define E1_CARDS      16
 #define E1_PORT_PER_CARD	8
+#define SLOT_MAX			256
+#define IDLE				0xEE
+
 /*port type */
 #define SS7_PORT      0
 #define ISDN_PORT     1
@@ -53,8 +56,10 @@ typedef struct {
 	u8_t 	e1_l1_alarm;
 	u8_t 	e1_l2_alarm;
 	u8_t 	cpu_loading;
+	u8_t	conf_module_installed;
+	u8_t	mfc_module_installed;
 	u8_t 	loopback_flag[8];
-	u32_t 		timestamp;
+	u32_t 	timestamp;
 } ram_params_t;
 
 typedef struct {
@@ -64,10 +69,19 @@ typedef struct {
 	u8_t 	ls_in;
 	u8_t 	old_mfc_par;
 	u8_t 	mfc_value;
+	u8_t	dtmf_space_delay;
+	u8_t	dtmf_mark_delay;
+	u8_t	connect_tone_flag;
+	u8_t	dmodule_ctone;
+	u8_t 	dslot_ctone;
+    u8_t    connect_time;
+	u8_t	port_to_group;
 } slot_t;
 
 extern e1_params_t	e1_params;
 extern ram_params_t ram_params;
+extern slot_t		slot_params[SLOT_MAX];
+extern u8_t group_user[81];
 
 extern void update_eeprom(void);
 extern void reload_eeprom(void);

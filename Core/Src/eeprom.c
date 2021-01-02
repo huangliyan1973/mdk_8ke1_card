@@ -11,7 +11,7 @@
 
 #include "main.h"
 #include "eeprom.h"
-#include "8ke1_debug.h"
+#include "card_debug.h"
 #include "mtp.h"
 
 #define   E1_CARD_VERSION   0x1
@@ -25,6 +25,8 @@
 
 e1_params_t	e1_params;
 ram_params_t ram_params;
+slot_t  slot_params[SLOT_MAX];
+u8_t  group_user[81];
 
 void update_eeprom(void)
 {

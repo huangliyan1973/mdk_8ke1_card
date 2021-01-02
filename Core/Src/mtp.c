@@ -6,7 +6,7 @@
 #include "main.h"
 #include "lwip/sys.h"
 
-#include "8ke1_debug.h"
+#include "card_debug.h"
 #include "ds26518.h"
 #include "mtp.h"
 #include "sram.h"

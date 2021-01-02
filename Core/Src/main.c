@@ -25,7 +25,7 @@
 #include "gpio.h"
 #include "fsmc.h"
 #include "sram.h"
-#include "8ke1_debug.h"
+#include "card_debug.h"
 #include "ip4_addr.h"
 
 /* Private includes ----------------------------------------------------------*/
