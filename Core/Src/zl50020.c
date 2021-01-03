@@ -203,6 +203,6 @@ void set_card_e1_led(void)
     u8_t *led_red = (u8_t *)LED1_ADDR;
     u8_t *led_green = (u8_t *)LED2_ADDR;
 
-    *led_green = (!ram_params.e1_l1_alarm & e1_params.e1_enable[card_id & 0xF]) & e1_params.e1_l2_alarm_enable;
+    *led_green = (!ram_params.e1_l1_alarm & e1_params.e1_enable[card_id & 0xF]) & e1_params.e1_l2_alarm_enable[card_id & 0xF];
     *led_red = (ram_params.e1_l1_alarm | !ram_params.e1_l2_alarm) & e1_params.e1_enable[card_id & 0xF];
 }
