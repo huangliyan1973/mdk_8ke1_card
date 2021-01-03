@@ -17,14 +17,22 @@
 #define TONE32_OFFSET  (0xF000)
 #define CONF_OFFSET    (0xE000)
 #define MFC_OFFSET     (0xD000)
+#define CARD_ID_OFFSET (0xA000)
+#define LED_GREEN_OFFSET       (0xB000)
+#define LED_RED_OFFSET        (0xC000)
 
 #define TONE32_ADDR     (MODULE_BASE + TONE32_OFFSET)
 #define CONF_ADDR       (MODULE_BASE + CONF_OFFSET)
 #define MFC_ADDR        (MODULE_BASE + MFC_OFFSET)
+#define CARD_ID_ADDR    (MODULE_BASE + CARD_ID_OFFSET)
+#define LED1_ADDR       (MODULE_BASE + LED_GREEN_OFFSET)
+#define LED2_ADDR       (MODULE_BASE + LED_RED_OFFSET)
 
 #define CONF_C_ADDR     (CONF_ADDR + 1)
 
 #define ZL_DEV (struct zl50020_dev *)ZL50020_BASE
+
+extern u8_t card_id;
 
 void zl50020_init(void)
 {
@@ -62,6 +70,7 @@ void zl50020_init(void)
     dev->cr &= ~(0x8);
 
     //ODE enable.
+    //PC0 for ODE function.
 
     //Set ISR for STI stream clk
     dev->sicr[0] = 0x4; //16.384M for DS26518
@@ -181,4 +190,19 @@ void conf_module_detect(void)
     } else {
         ram_params.conf_module_installed = 0;
     }
+}
+
+u8_t get_card_id(void)
+{
+    u8_t *data = (u8_t *)CARD_ID_ADDR;
+    return (*data);
+}
+
+void set_card_e1_led(void)
+{
+    u8_t *led_red = (u8_t *)LED1_ADDR;
+    u8_t *led_green = (u8_t *)LED2_ADDR;
+
+    *led_green = (!ram_params.e1_l1_alarm & e1_params.e1_enable[card_id & 0xF]) & e1_params.e1_l2_alarm_enable;
+    *led_red = (ram_params.e1_l1_alarm | !ram_params.e1_l2_alarm) & e1_params.e1_enable[card_id & 0xF];
 }

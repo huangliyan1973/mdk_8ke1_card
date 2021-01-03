@@ -134,6 +134,7 @@ int main(void)
   card_id = 0;
   init_eeprom();
   test_sram();
+  card_debug_init();
   /* USER CODE END 2 */
 
   /* Init scheduler */

@@ -22,6 +22,12 @@
 
 /* USER CODE BEGIN 0 */
 #include <stdio.h>
+#include <stdarg.h>
+#include <string.h>
+#include "lffifo.h"
+#include "cmsis_os2.h"
+
+static struct lffifo  *tx_buf;
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart1;
@@ -126,6 +132,46 @@ PUTCHAR_PROTOTYPE
     ITM_SendChar(ch);
 	return ch;
 }
+
+
+void card_printf(const char *fmt, ...)
+{
+  char buf[512];
+
+  va_list  ap;
+  va_start(ap, fmt);
+  vsprintf(buf, fmt, ap);
+  va_end(ap);
+
+  if (tx_buf) {
+    lffifo_put(tx_buf, (u8_t *)buf, strlen(buf));
+  }
+}
+
+
+static void card_debug_thread(void *arg)
+{
+  u16_t len;
+  u8_t buf[512];
+    
+  card_printf("System run at %d frequence.\n", SystemCoreClock);
+  
+  for(;;) {
+    len = lffifo_get(tx_buf, buf, 512);
+    if (len > 0) {
+      HAL_UART_Transmit(&huart1, buf, len, 0xfffffffe);
+    } else {
+      osDelay(1);
+    }
+  }
+}
+
+void card_debug_init(void)
+{
+  tx_buf = lffifo_alloc(2048);
+  sys_thread_new("card_debug", card_debug_thread, NULL, 2048, osPriorityNormal-1);
+}
+
 
 /* USER CODE END 1 */
 
