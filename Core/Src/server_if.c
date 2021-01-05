@@ -406,3 +406,69 @@ void send_isdn_test_msg(void)
     send_isdn_msg(2, test_buf, sizeof(test_buf)/test_buf[0]);
 }
 
+void send_lsin_to_msc(u8_t e1_no)
+{
+    struct msc_msg lsin_msg;
+
+    lsin_msg.m_head.sio = OTHER_SIO;
+    lsin_msg.m_head.msg_type = 0x7;
+    lsin_msg.src_slot = e1_no << 5;
+    lsin_msg.decode_type = 0x3;
+    lsin_msg.digit = e1_no;
+    lsin_msg.m_head.msu_len = MAPB_HEAD_SIZE + OTHER_MSG_CONTENT_SIZE + 32 - 1; // not include itself.
+
+    for (u8_t i = 0; i < 32; i++)
+    {
+        lsin_msg.other[i] = slot_params[(e1_no << 5) + i].ls_in;
+    }
+
+    send_other_msg((struct other_msg *)&lsin_msg, 32);
+}
+
+void send_mfc_num_to_msc(void)
+{
+    struct msc_msg mfc_msg;
+
+    mfc_msg.m_head.sio = OTHER_SIO;
+    mfc_msg.m_head.msg_type = 0x7;
+    mfc_msg.src_slot = (7 << 5);
+    mfc_msg.dst_id = card_id & 0x10;
+    mfc_msg.decode_type = 0x5;
+    mfc_msg.digit = 1;
+
+    send_other_msg((struct other_msg *)&mfc_msg, 0);
+}
+
+void send_mfc_par_to_msc(u8_t e1_no)
+{
+    struct msc_msg mfc_msg;
+
+    mfc_msg.m_head.sio = OTHER_SIO;
+    mfc_msg.m_head.msg_type = 0x7;
+    mfc_msg.src_slot = (e1_no << 5);
+    mfc_msg.dst_id = 0;
+    mfc_msg.decode_type = 0x4;
+    mfc_msg.digit = e1_no;
+
+    for (u8_t i = 0; i < 32; i++)
+    {
+        mfc_msg.other[i] = slot_params[(e1_no << 5) + i].mfc_value;
+    }
+
+    send_other_msg((struct other_msg *)&mfc_msg, 32);
+}
+
+void send_dtmf_to_msc(u8_t slot, u8_t dtmf)
+{
+    struct msc_msg dtmf_msg;
+
+    dtmf_msg.m_head.sio = OTHER_SIO;
+    dtmf_msg.m_head.msg_type = 0x7;
+    dtmf_msg.src_slot = slot;
+    dtmf_msg.dst_id = slot_params[slot].dmodule_ctone;
+    dtmf_msg.dst_slot = slot_params[slot].dslot_ctone;
+    dtmf_msg.decode_type = 0x2;
+    dtmf_msg.digit = dtmf;
+
+    send_other_msg((struct other_msg *)&dtmf_msg, 0);
+}

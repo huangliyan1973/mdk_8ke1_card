@@ -473,6 +473,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\Src\lffifo.c</FilePath>
             </File>
+            <File>
+              <FileName>shell.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\shell.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

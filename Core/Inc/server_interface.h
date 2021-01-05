@@ -14,6 +14,10 @@
 #define  OTHER_SIO			0x87
 #define  MTP2_COMMAND_SIO   0xFF
 
+#define  IP_HEAD_SIZE	 (sizeof(struct ip_head))
+#define  MAPB_HEAD_SIZE  (sizeof(struct mapb_head))
+#define  OTHER_MSG_CONTENT_SIZE		5
+
 struct ss7_head {
 	u8_t		e1_no;
 	u8_t		len;
@@ -60,7 +64,7 @@ struct msc_msg {
 	u8_t				dst_slot;
 	u8_t				decode_type;
 	u8_t				digit;
-	u8_t				other[1];
+	u8_t				other[32];
 }__attribute__ ((packed));
 
 /* Send/Receive to/from msc  port : 4950 */ 

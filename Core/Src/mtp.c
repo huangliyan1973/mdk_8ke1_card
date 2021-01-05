@@ -5,6 +5,7 @@
 
 #include "main.h"
 #include "lwip/sys.h"
+#include "FreeRTOS.h"
 
 #include "card_debug.h"
 #include "ds26518.h"
@@ -25,8 +26,10 @@
 #define T17_TIMEOUT     1200
 
 static mtp2_t mtp2_state[E1_LINKS_MAX] __attribute__((at(SRAM_BASE_ADDR)));
+
 static sys_mbox_t mtp_mbox;
 sys_mutex_t lock_mtp_core;
+osSemaphoreId	mtp_semaphore = NULL;
 
 static void abort_initial_alignment(mtp2_t *m);
 static void start_initial_alignment(mtp2_t *m, char* reason);
@@ -594,7 +597,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     /* PA5 for DS26518 INTERRUPT */
 	if (GPIO_Pin == GPIO_PIN_5){
-		ds26518_isr();
+		//ds26518_isr();
+        osSemaphoreRelease(mtp_semaphore);
 	}
 }
 
@@ -661,6 +665,29 @@ static void mtp_thread_handle_msg(struct ss7_msg *msg)
 
 }
 
+void mtp_lowlevel_scan(void *arg)
+{
+    (void)arg;
+
+    for(;;) {
+        if (osSemaphoreAcquire(mtp_semaphore, portMAX_DELAY) == osOK) {
+            LOCK_MTP2_CORE();
+            ds26518_isr();
+            UNLOCK_MTP2_CORE();
+        }
+    }
+}
+
+static void mtp_lowlevel_init(void)
+{
+    osThreadAttr_t attributes;
+    memset(&attributes, 0x0, sizeof(osThreadAttr_t));
+    attributes.name = "mtp_lowlevel";
+    attributes.stack_size = 350;
+    attributes.priority = osPriorityRealtime;
+    osThreadNew(mtp_lowlevel_scan, NULL, &attributes);
+}
+
 static void mtp2_thread(void *arg)
 {
     struct ss7_msg *msg;
@@ -695,6 +722,10 @@ void mtp_init(void)
     if (sys_mutex_new(&lock_mtp_core) != ERR_OK) {
         CARD_ASSERT("failed to create lock_mtp_core", 0);
     }
+
+    mtp_semaphore = osSemaphoreNew(1, 1, NULL);
+
+    mtp_lowlevel_init();
 
     sys_thread_new("mtp2", mtp2_thread, NULL, DEFAULT_THREAD_STACKSIZE, osPriorityNormal);
 }
@@ -792,3 +823,4 @@ void bad_msg_rev(u8_t e1_no, u8_t err)
      4: Overrun.
     */
 }
+

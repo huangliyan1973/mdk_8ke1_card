@@ -26,6 +26,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "shell.h"
 #include "server_interface.h"
 /* USER CODE END Includes */
 
@@ -118,9 +119,9 @@ void StartDefaultTask(void *argument)
   /* init code for LWIP */
   MX_LWIP_Init();
   /* USER CODE BEGIN StartDefaultTask */
-  snmp_8ke1_init();
+  //snmp_8ke1_init();
   server_interface_init();
-  
+  shell_init();
   for(;;)
   {
     osDelay(1);
