@@ -26,6 +26,8 @@ static card_heart_t  hb_msg;
 void send_ss7_test_msg(void);
 void send_isdn_test_msg(void);
 
+void hb_msg_init(void);
+
 static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *src_addr)
 {
     struct other_msg  *ot_msg = (struct other_msg *)p->payload;
@@ -273,6 +275,7 @@ static void ss7_netconn_thread(void *arg)
 
 void server_interface_init(void)
 {   
+    hb_msg_init();
     sys_thread_new("ss7_netconn", ss7_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
     sys_thread_new("isdn_netconn", isdn_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
     //sys_thread_new("other_netconn", other_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
@@ -587,6 +590,7 @@ void hb_msg_init(void)
     hb_msg.hb_version[0] = 9;
     hb_msg.hb_version[1] = 0;
     hb_msg.hb_version[2] = 0;
+    hb_msg.component.cpu_loading = 19;
 }
 
 void send_card_heartbeat(u8_t dst_flag)
