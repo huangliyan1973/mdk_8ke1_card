@@ -126,10 +126,15 @@ union updmsg {
 #define LED_NUM			16
 
 typedef struct {
-	u8_t    flag;
-	u8_t    alarm_code;
-	u8_t    status_len;
-	u8_t    status[256];
+	u8_t    e1_install;
+	u8_t    e1_l2_install_fg;
+	u8_t    e1_l1_alarm;
+	u8_t 	e1_l2_alarm;
+	u8_t 	echo_fg;
+	u8_t 	cpu_loading;
+	u8_t 	src_clk;
+	u8_t 	freq;
+	u8_t 	master_clk_fg;
 }__attribute__ ((packed)) component_t;
 
 typedef struct{
@@ -141,17 +146,28 @@ typedef struct{
 	u8_t    alarm_code;
 	u8_t    reserved;
 	u8_t    length;
-	u8_t    *info;
+	u8_t    info[8];
 }__attribute__ ((packed)) heart_t;
 
+/* whole heartbeat msg len = 58 */
 typedef struct {
-	u8_t            	sys_id;
-	u8_t            	subsys_id;
-	u8_t            	led[LED_NUM];
-    component_t   		component[COMPONENT_NUM]; //COMPONENT_NUM=9
-    u8_t            	alarm_num;
-    heart_t   			msg;
-}__attribute__ ((packed)) heartMsg_t;
+	u8_t            	sys_id;     				// 0
+	u8_t            	subsys_id;  				// 1
+	u32_t    			timestamp;   				// 2
+	u8_t				omcled[8];					// 6
+	u8_t				cp_id;						// 14
+	u8_t				alarm_code;					// 15
+	u8_t 				alarm_level;				// 16
+	u8_t 				hbextLen;					// 17
+	u8_t 				hb_version[3];				// 18
+	u8_t				reserved;					// 21
+    component_t   		component; 					// 22
+	u8_t				hb_lock_state;				// 31
+	u8_t				crc4_count[8];				// 32
+	u8_t				self_check_result;			// 40
+	u8_t				hb_conf;					// 41
+	u8_t				hb_fdl[16];					// 42
+}__attribute__ ((packed)) card_heart_t;
 
 extern ip4_addr_t  sn0;
 extern ip4_addr_t  sn1;
@@ -164,6 +180,8 @@ extern void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len);
 extern void send_other_msg(struct other_msg *msg, u8_t len);
 
 extern void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len);
+
+extern void send_trap_msg(card_heart_t *card_msg, u8_t dst_flag);
 
 extern void server_interface_init(void);
 

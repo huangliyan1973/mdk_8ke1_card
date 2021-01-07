@@ -52,7 +52,6 @@ struct snmp_msg_trap {
   u16_t vbseqlen;
 };
 
-static void setup_trap_msg(void);
 static u16_t snmp_trap_varbind_sum(struct snmp_msg_trap *trap, struct snmp_varbind *varbinds);
 static u16_t snmp_trap_header_sum(struct snmp_msg_trap *trap, u16_t vb_len);
 static err_t snmp_trap_header_enc(struct snmp_msg_trap *trap, struct snmp_pbuf_stream *pbuf_stream);
@@ -723,7 +722,7 @@ static void snmp_netconn_thread(void *arg)
 
   snmp_8ke1_traps_handle = conn;
     
-  setup_trap_msg();
+  //setup_trap_msg();
 
   do {
     err = netconn_recv(conn, &buf);
@@ -775,9 +774,6 @@ err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
     trap_msg.request_id = request_id++;
     trap_msg.error_index = trap_msg.error_status = 0;
     
-    //for test
-    trap_dst[0].enable = 0;
-    
     for ( i = 0, td = &trap_dst[0]; i < SNMP_8KE1_TRAP_DESTINATIONS; i++, td++) {
         if ((td->enable != 0) && !ip_addr_isany(&td->dip)) {
             if (snmp_get_local_ip_for_dst(snmp_8ke1_traps_handle, &td->dip, &trap_msg.sip)) {
@@ -812,30 +808,27 @@ err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
     return err;
 }
 
-static void setup_trap_msg(void)
+void send_trap_msg(card_heart_t *card_msg, u8_t dst_flag)
 {
     struct snmp_varbind var;
-    heart_t h_msg;
     
     memset(&var, 0, sizeof(struct snmp_varbind));
     var.type = SNMP_ASN1_TYPE_OCTET_STRING;
     memcpy((void *)var.oid.id, snmp_8ke1_enterprise_oid->id, snmp_8ke1_enterprise_oid->len * sizeof(u32_t));
     var.oid.len = snmp_8ke1_enterprise_oid->len;
-    var.value_len = sizeof(heart_t);
-    
-    ram_params.timestamp = HAL_GetTick();
-    h_msg.sys_id = plat_no;
-    h_msg.subsys_id = card_id & 0x0F;
-    h_msg.length = 0;
-    h_msg.timestamp = PP_HTONL(ram_params.timestamp);
-    h_msg.alarm_code = 1;
-    h_msg.component_id = 0x2;
-    h_msg.length = 0;
-    h_msg.info = NULL;
-    memset(h_msg.led_color, 0xEE, 8);
-    
-    var.value = (void *)&h_msg;
-    
+    var.value_len = sizeof(card_heart_t);
+
+    var.value = (void *)card_msg;
+
+    dst_flag = dst_flag % 3;
+
+    for (u8_t i = 0; i < 3; i++) {
+        if (i == dst_flag) {
+            trap_dst[i].enable = 1;
+        } else {
+            trap_dst[i].enable = 0;
+        }
+    }
     snmp_send_8ke1_trap(&var);
 }
 

@@ -76,6 +76,8 @@ typedef struct {
 	u8_t 	dslot_ctone;
     u8_t    connect_time;
 	u8_t	port_to_group;
+	u8_t 	ct_delay;
+	u8_t 	echo_state;
 } slot_t;
 
 extern e1_params_t	e1_params;

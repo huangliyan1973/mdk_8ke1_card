@@ -206,3 +206,9 @@ void set_card_e1_led(void)
     *led_green = (!ram_params.e1_l1_alarm & e1_params.e1_enable[card_id & 0xF]) & e1_params.e1_l2_alarm_enable[card_id & 0xF];
     *led_red = (ram_params.e1_l1_alarm | !ram_params.e1_l2_alarm) & e1_params.e1_enable[card_id & 0xF];
 }
+
+u8_t read_dtmf(u8_t slot)
+{
+    u8_t *data = (u8_t *)MFC_ADDR;
+    return data[slot & 0x1F];
+}

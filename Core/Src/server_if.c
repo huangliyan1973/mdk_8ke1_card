@@ -21,6 +21,8 @@ static struct netconn *ss7_conn;
 static struct netconn *isdn_conn;
 //static struct netconn *other_conn;
 
+static card_heart_t  hb_msg;
+
 void send_ss7_test_msg(void);
 void send_isdn_test_msg(void);
 
@@ -471,4 +473,236 @@ void send_dtmf_to_msc(u8_t slot, u8_t dtmf)
     dtmf_msg.digit = dtmf;
 
     send_other_msg((struct other_msg *)&dtmf_msg, 0);
+}
+
+#define CONNECT_TONE_FLAG   1
+#define CONNECT_DTMF_FLAG   2
+#define DECODE_DTMF_FLAG    3
+
+static u8_t *get_tone_cadence(u8_t index)
+{
+    u8_t *tone = e1_params.tone_cadence0;
+    return (tone + (u16_t)(index * 18));
+}
+
+/* Run at 50ms schedule. */ 
+void connect_tone_proc(u8_t st_slot, u8_t end_slot)
+{
+    u8_t toneno, current_delay, cadence_byte;
+    u8_t cadence_bit, cadence;
+    u8_t dslot, con_port, con_slot, code;
+    u8_t *tone;
+
+    for (u8_t slot = st_slot; slot < end_slot; slot++) {
+        switch (slot_params[slot].connect_tone_flag & 0x7) {
+        case CONNECT_TONE_FLAG:
+            current_delay = slot_params[slot].ct_delay;
+            toneno = (slot_params[slot].connect_tone_flag >> 4) & 0x7;
+            tone = get_tone_cadence(toneno);
+
+            cadence_byte = current_delay >> 3;
+            cadence_bit = current_delay & 0x7;
+            cadence = (tone[2 + cadence_byte]) >> (7 - cadence_bit);
+            dslot = slot_params[slot].dslot_ctone;
+
+            con_port = (dslot >> 5) + (slot_params[slot].dmodule_ctone & 0xf) << 3;
+            con_slot = dslot & 0x1f;
+
+            if (cadence & 1) {
+                con_port = TONE_E1;
+                con_slot = tone[0] & 0x1f;
+            } 
+
+            if (con_port == TONE_E1 && con_slot ==  TONE_SILENT) {
+                connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
+            } else {
+                connect_tone(slot & 0x1f, slot >> 5, con_slot, TONE_STREAM); // ???
+            }
+            slot_params[slot].ct_delay++;
+            if (slot_params[slot].connect_time ==  0)  {
+                slot_params[slot].ct_delay = 0;
+                slot_params[slot].connect_tone_flag = 0xF0;
+                if (con_port == TONE_E1 && con_slot == TONE_SILENT) {
+                    connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
+                } else {
+                    connect_tone(slot & 0x1f, slot >> 5, con_slot, TONE_STREAM); //???
+                }
+            } else if (slot_params[slot].ct_delay >= tone[1]) {
+                slot_params[slot].ct_delay = 0;
+            }
+            slot_params[slot].connect_time--;
+            break;
+        case CONNECT_DTMF_FLAG:
+            toneno = (slot_params[slot].connect_tone_flag >> 4);
+            if (slot_params[slot].dtmf_mark_delay > 0) {
+                connect_tone(slot & 0x1f, slot >> 5, toneno, TONE_STREAM);
+                slot_params[slot].dtmf_mark_delay--;
+            } else {
+                if (slot_params[slot].dtmf_space_delay == 0) {
+                    dslot = slot_params[slot].dslot_ctone;
+                    slot_params[slot].connect_tone_flag = 0xF0;
+
+                    con_port = (dslot >> 5) + ((slot_params[slot].dmodule_ctone & 0xf) << 3);
+                    con_slot = dslot & 0x1f;
+
+                    if (con_port == TONE_E1 && con_slot == TONE_SILENT) {
+                        connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
+                    } else {
+                        connect_tone(slot & 0x1f, slot >> 5, con_slot, TONE_STREAM); //???
+                    }
+                } else {
+                    connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
+                    slot_params[slot].dtmf_space_delay--;
+                }
+            }
+            break;
+        case DECODE_DTMF_FLAG:
+            code = read_dtmf(slot);
+            slot_params[slot].connect_tone_flag = (slot_params[slot].connect_tone_flag & 0x3) |
+                                                  (code << 3);
+            switch (slot_params[slot].echo_state & 0x3) {
+            case 0:
+                if (code >= 0x11 && code <= 0x1C) {
+                    code &= 0xF;
+                    code = (code == 0xA) ? 0 : code;
+                    send_dtmf_to_msc(slot, code);
+                    slot_params[slot].echo_state = 1;
+                } 
+                break;
+            case 1:
+                if ((code & 0x7F) == 0) {
+                    slot_params[slot].echo_state = 0;
+                }
+                break;
+            }
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+void hb_msg_init(void)
+{
+    hb_msg.hb_version[0] = 9;
+    hb_msg.hb_version[1] = 0;
+    hb_msg.hb_version[2] = 0;
+}
+
+void send_card_heartbeat(u8_t dst_flag)
+{
+
+    hb_msg.sys_id = (card_id >> 4) & 1;
+    hb_msg.subsys_id = card_id & 0xF;
+    hb_msg.timestamp = PP_HTONL(ram_params.timestamp);
+
+    hb_msg.component.e1_install = e1_params.e1_enable[card_id & 0xF];
+    hb_msg.component.e1_l2_install_fg = 0;
+    hb_msg.component.e1_l2_alarm = ram_params.e1_l2_alarm;
+    hb_msg.component.e1_l1_alarm = ram_params.e1_l1_alarm;
+
+    send_trap_msg(&hb_msg, dst_flag);
+}
+
+/* run at 50ms period */
+u8_t alarm_state[16];
+u8_t alarm_code[16];
+u8_t component_id[16];
+u8_t need_alarm_omc[16];
+
+
+void alarm_fsm(u8_t proc)
+{
+    u8_t cl;
+    u8_t ii, jj;
+
+    switch (alarm_state[proc] & 1) {
+    case 0: //normal 
+        if (need_alarm_omc[proc] == 1) {
+            hb_msg.cp_id = component_id[proc];
+            hb_msg.alarm_code = 0;
+            need_alarm_omc[proc] = 0;
+            send_card_heartbeat(2); //send to omc
+        }
+        if (alarm_code[proc] != IDLE) {
+            hb_msg.cp_id = component_id[proc];
+            hb_msg.alarm_code = alarm_code[proc];
+            send_card_heartbeat(plat_no); // send to sn
+            need_alarm_omc[proc] = 1;
+            alarm_state[proc] = 1;
+        }
+        break;
+    case 1: // abnormal
+        if (need_alarm_omc[proc] == 1) {
+            hb_msg.cp_id = component_id[proc];
+            hb_msg.alarm_code = alarm_code[proc];
+            need_alarm_omc[proc] = 0;
+            send_card_heartbeat(2); // to omc
+        }
+        if (alarm_code[proc] == IDLE) {
+            hb_msg.cp_id = component_id[proc];
+            hb_msg.alarm_code = 0;
+            send_card_heartbeat(plat_no); // to sn
+            alarm_code[proc] = 0;
+        }
+        break;
+    }
+
+    cl = 0xF;
+    if (proc < 8) {
+        /* E1 LED */
+        component_id[proc] = proc + 0x10;
+        if (((e1_params.e1_enable[card_id & 0xF] >> proc) & 1) == 0) {
+            cl = 0x8; /* Gray */
+            if (alarm_code[proc] != IDLE) {
+                alarm_code[proc] = IDLE;
+            } 
+        } else if (((ram_params.e1_l1_alarm >> proc) & 1) == 1) {
+            alarm_code[proc] = 1;
+            cl = 0xB;  /* Red */
+        } else if (((ram_params.e1_l2_alarm >> proc) & 1) != 1) {
+            cl = 0xA; /* Yellow */
+        } else {
+            if (alarm_code[proc] != IDLE) {
+                alarm_code[proc] = IDLE;
+            }
+            cl = 0x9; /* Green */
+        }
+    } else if (proc < 11) {
+        if (proc == 9) {  /* Master clock */
+            hb_msg.omcled[0] = 1;
+        } else if (proc == 10) { /* DPLL */
+            //Todo:
+            component_id[proc] = 0x40;
+            //如果锁时钟失败
+            //alarm_code[proc] = lock_alarm;
+            //如果锁时钟成功
+            alarm_code[proc] = IDLE;
+        }
+    } else if (proc < 14) {
+        if ((card_id & (1 << (proc - 6))) == 0) {
+            if (alarm_code[proc] != IDLE) {
+                alarm_code[proc] = IDLE;
+            }
+            cl = 9;
+        }
+    }
+
+    if (proc < 14) {
+        ii = (proc >> 1) + 1;
+        jj = hb_msg.omcled[ii];
+        if (proc & 1) {
+            jj = (jj & 0xF0) + cl;
+        } else {
+            jj = (jj & 0x0F) + (cl << 4);
+        }
+        hb_msg.omcled[ii] = jj;
+    }
+
+    if ((card_id & 0xF) > 1) {
+        hb_msg.omcled[6] = 0xff;
+        hb_msg.omcled[7] = 0xff;
+    } else {
+        hb_msg.omcled[6] = 0xF9;
+    }
 }
