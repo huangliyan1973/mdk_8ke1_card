@@ -14,6 +14,7 @@
 #include "card_debug.h"
 #include "mtp.h"
 #include "lwip/sys.h"
+#include "lwip/def.h"
 
 /* FSMC_NE2 for ds26518 */
 #define DS26518_BASE			(0x64000000)
@@ -88,6 +89,49 @@ static void ds26518_tcice_init(int e1_no)
 	f->tcice[1] = 0xff;
 	f->tcice[2] = 0xfe; /* slot 16 disable */
 	f->tcice[3] = 0xff;
+}
+
+/* slot: 0 - 31 ; e1_no: 0 - 7 */
+u8_t read_rx_abcd(int e1_no, u8_t slot)
+{
+	if (slot == 0 || slot == 0x10) {
+		return 0;
+	}
+
+	FRAMER *f = ds26518_framer(e1_no);
+	
+	if (slot & 0x10) {
+		return  (f->rs[(slot & 0x10)] & 0x0F);
+	}
+
+	return (f->rs[(slot & 0x10)] >> 4);	
+}
+
+void out_tx_abcd(int e1_no, u8_t slot, u8_t value)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+
+	u8_t old_value = f->ts[slot & 0x10];
+
+	if (slot == 0 || slot == 0x10) {
+		return;
+	}
+
+	if (slot & 0x10) {
+		f->ts[slot & 0x10] = (old_value & 0xF0) | (value & 0x0F);
+	} else {
+		f->ts[slot & 0x10] = (old_value & 0x0F) | (value << 4);
+	}
+}
+
+u32_t check_rx_change(int e1_no)
+{
+	u32_t temp;
+	FRAMER *f = ds26518_framer(e1_no);
+
+	temp = PP_HTONL((u32_t)f->rss[0]);
+	CARD_DEBUGF(MTP_DEBUG, ("RX_ABCD change value = %4X\n", temp));
+	return temp;
 }
 
 void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)

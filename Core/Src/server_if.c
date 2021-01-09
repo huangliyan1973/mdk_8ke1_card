@@ -608,6 +608,32 @@ void send_card_heartbeat(u8_t dst_flag)
     send_trap_msg(&hb_msg, dst_flag);
 }
 
+/* 20ms period */
+void ls_scan(int e1_no)
+{
+    e1_no &= 0x7;
+
+    if (!CHN_NO1_PORT_ENABLE(e1_no) || !E1_PORT_ENABLE(e1_no)) {
+        return;
+    }
+    if ((ram_params.e1_l1_alarm >> e1_no) & 1) {
+        return;
+    }
+
+    u32_t change = check_rx_change(e1_no);
+    if (change == 0) {
+        return;
+    }
+
+    for (u8_t i = 1; i < 32; i++) {
+        if ((change >> i) & 1) {
+            slot_params[(e1_no << 5) + i].ls_in = read_rx_abcd(e1_no, i);
+        }
+    }
+
+    send_lsin_to_msc(e1_no);
+}
+
 /* run at 50ms period */
 u8_t alarm_state[16];
 u8_t alarm_code[16];
@@ -709,4 +735,9 @@ void alarm_fsm(u8_t proc)
     } else {
         hb_msg.omcled[6] = 0xF9;
     }
+}
+
+void period_50ms_proc(void)
+{
+    
 }

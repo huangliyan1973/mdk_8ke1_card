@@ -596,7 +596,7 @@ static void mtp2_read_su(mtp2_t *m, u8_t *buf, int len)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     /* PA5 for DS26518 INTERRUPT */
-	if (GPIO_Pin == GPIO_PIN_5){
+	if (GPIO_Pin == GPIO_PIN_5) {
 		//ds26518_isr();
         osSemaphoreRelease(mtp_semaphore);
 	}
@@ -642,7 +642,7 @@ void e1_port_init(int e1_no)
             m->protocal = PRI_PROTO_TYPE;
             m->pri_mode = PRI_NETWORK_ENABLE(e1_no) ? PRI_NETWORK : PRI_CPE;
             ds26518_port_init(e1_no, CCS_TYPE);
-            //q921_start(m);
+            q921_start(m);
         }
     } else { /* china no.1 */
         ds26518_port_init(e1_no, CAS_TYPE);
