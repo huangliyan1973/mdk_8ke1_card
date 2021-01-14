@@ -181,8 +181,12 @@ extern void send_other_msg(struct other_msg *msg, u8_t len);
 
 extern void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len);
 
-extern void send_trap_msg(card_heart_t *card_msg, u8_t dst_flag);
+extern void send_trap_msg(u8_t dst_flag);
 
 extern void server_interface_init(void);
+
+extern void update_no1_e1(u8_t new_value);
+
+extern void period_10s_proc(void *arg);
 
 #endif /* INC_CSU_IF_H_ */

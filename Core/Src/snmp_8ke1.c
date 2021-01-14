@@ -31,6 +31,9 @@ static const struct snmp_obj_id *snmp_8ke1_enterprise_oid         = &snmp_8ke1_e
 
 static const char *snmp_community = "public";
 
+extern card_heart_t  hb_msg;
+static struct snmp_varbind  trap_var;
+
 struct snmp_msg_trap { 
   /* source IP address, raw network order format */
   ip_addr_t sip;
@@ -444,7 +447,8 @@ static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
                     } else if (sub_oid == 6) {
                         e1_params.crc4_enable[card_id] = value ;
                     } else if (sub_oid == 13) {
-                        e1_params.no1_enable[card_id] = value ;
+                        update_no1_e1(value);
+                        //e1_params.no1_enable[card_id] = value ;
                     } else if (sub_oid == 8) {
                         e1_params.mtp2_error_check[card_id] = value ;
                     } else {
@@ -722,8 +726,8 @@ static void snmp_netconn_thread(void *arg)
 
   snmp_8ke1_traps_handle = conn;
     
-  //setup_trap_msg();
-
+  period_10s_proc(NULL);
+    
   do {
     err = netconn_recv(conn, &buf);
 
@@ -737,6 +741,16 @@ static void snmp_netconn_thread(void *arg)
   } while (1);
 }
 
+static void trap_var_init(void)
+{
+    memset(&trap_var, 0, sizeof(struct snmp_varbind));
+
+    trap_var.type = SNMP_ASN1_TYPE_OCTET_STRING;
+    snmp_oid_assign(&trap_var.oid, snmp_8ke1_enterprise_oid->id, snmp_8ke1_enterprise_oid->len);
+    trap_var.value_len = sizeof(card_heart_t);
+    trap_var.value = (void *)&hb_msg;
+}
+
 void snmp_8ke1_init(void)
 {   
     IP4_ADDR(&sn0, 172, 18, 98, 1);
@@ -747,18 +761,11 @@ void snmp_8ke1_init(void)
     ip4_addr_copy(trap_dst[1].dip, sn1);
     ip4_addr_copy(trap_dst[2].dip, omc);
 
-    if (plat_no) {   //plat 1
-        trap_dst[1].enable = 1;
-        trap_dst[0].enable = 0;
-    } else {
-        trap_dst[1].enable = 0;
-        trap_dst[0].enable = 1;
-    }
-
-    trap_dst[2].enable = 1;
+    trap_var_init();
 
     sys_thread_new("snmp_netconn", snmp_netconn_thread, NULL, SNMP_STACK_SIZE, osPriorityNormal);
 }
+
 
 err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
 {
@@ -770,6 +777,10 @@ err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
     u16_t i, tot_len;
     err_t err = ERR_OK;
 
+    if (snmp_8ke1_traps_handle == NULL) {
+        return ERR_RTE;
+    }
+    
     trap_msg.snmp_version = SNMP_VERSION_2c;
     trap_msg.request_id = request_id++;
     trap_msg.error_index = trap_msg.error_status = 0;
@@ -808,18 +819,8 @@ err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
     return err;
 }
 
-void send_trap_msg(card_heart_t *card_msg, u8_t dst_flag)
+void send_trap_msg(u8_t dst_flag)
 {
-    struct snmp_varbind var;
-    
-    memset(&var, 0, sizeof(struct snmp_varbind));
-    var.type = SNMP_ASN1_TYPE_OCTET_STRING;
-    memcpy((void *)var.oid.id, snmp_8ke1_enterprise_oid->id, snmp_8ke1_enterprise_oid->len * sizeof(u32_t));
-    var.oid.len = snmp_8ke1_enterprise_oid->len;
-    var.value_len = sizeof(card_heart_t);
-
-    var.value = (void *)card_msg;
-
     dst_flag = dst_flag % 3;
 
     for (u8_t i = 0; i < 3; i++) {
@@ -829,7 +830,7 @@ void send_trap_msg(card_heart_t *card_msg, u8_t dst_flag)
             trap_dst[i].enable = 0;
         }
     }
-    snmp_send_8ke1_trap(&var);
+    snmp_send_8ke1_trap(&trap_var);
 }
 
 static u16_t

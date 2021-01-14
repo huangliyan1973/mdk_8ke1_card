@@ -28,6 +28,7 @@
 /* USER CODE BEGIN Includes */
 #include "shell.h"
 #include "server_interface.h"
+#include "sched.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -121,7 +122,8 @@ void StartDefaultTask(void *argument)
   /* USER CODE BEGIN StartDefaultTask */
   snmp_8ke1_init();
   server_interface_init();
-  shell_init();
+  //shell_init();
+  sched_timeout_init();
   for(;;)
   {
     osDelay(1);

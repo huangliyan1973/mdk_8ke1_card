@@ -334,7 +334,12 @@ extern void check_ccs_msg(u8_t e1_no);
 
 extern void bad_msg_rev(u8_t e1_no, u8_t err);
 
+extern u8_t read_l2_status(int e1_no);
+
+extern void e1_port_init(int e1_no);
+
 extern sys_mutex_t lock_mtp_core;
+
 #define LOCK_MTP2_CORE()	sys_mutex_lock(&lock_mtp_core)
 #define UNLOCK_MTP2_CORE()  sys_mutex_unlock(&lock_mtp_core)
 

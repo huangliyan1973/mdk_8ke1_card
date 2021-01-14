@@ -1404,4 +1404,6 @@ extern void out_tx_abcd(int e1_no, u8_t slot, u8_t value);
 
 extern u32_t check_rx_change(int e1_no);
 
+extern u8_t read_liu_status(int e1_no);
+
 #endif /* Build for Specific Driver */

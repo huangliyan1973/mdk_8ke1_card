@@ -7,10 +7,10 @@
 
 #define NET_DEBUG       1
 
-#define CARD_PLATFORM_ASSERT(x)  do { eth_printf("Assertion \"%s\" failed at line %d in %s\n", \
+#define CARD_PLATFORM_ASSERT(x)  do { printf("Assertion \"%s\" failed at line %d in %s\n", \
                                         x, __LINE__, __FILE__); } while(0)
 
-#define CARD_PLATFORM_DIAG(x)  do { eth_printf x; } while(0)
+#define CARD_PLATFORM_DIAG(x)  do { printf x; } while(0)
 
 #ifndef CARD_NOASSERT
 #define CARD_ASSERT(message, assertion) do { if (!(assertion)) { \

@@ -134,6 +134,16 @@ u32_t check_rx_change(int e1_no)
 	return temp;
 }
 
+u8_t read_liu_status(int e1_no)
+{
+	LIU *l = ds26518_liu(e1_no);
+
+	u8_t ret = l->llsr;
+	l->llsr = ret;
+
+	return ret & 1;
+}
+
 void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 {
 	FRAMER *f = ds26518_framer(e1_no);

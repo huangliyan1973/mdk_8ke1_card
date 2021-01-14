@@ -824,3 +824,22 @@ void bad_msg_rev(u8_t e1_no, u8_t err)
     */
 }
 
+u8_t read_l2_status(int e1_no)
+{
+    mtp2_t *m = &mtp2_state[e1_no];
+
+    if (m->protocal == NO1_PROTO_TYPE) {
+        return 0;
+    }
+
+    if (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_INSERVICE) {
+        return 1;
+    }
+
+    if (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_MULTI_FRAME_ESTABLISHED) {
+        return 1;
+    }
+
+    return 0;
+}
+

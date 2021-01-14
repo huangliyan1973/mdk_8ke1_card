@@ -14,6 +14,7 @@
 #include "server_interface.h"
 #include "ds26518.h"
 #include "zl50020.h"
+#include "sched.h"
 
 extern ip4_addr_t local_addr;
 
@@ -21,7 +22,7 @@ static struct netconn *ss7_conn;
 static struct netconn *isdn_conn;
 //static struct netconn *other_conn;
 
-static card_heart_t  hb_msg;
+card_heart_t  hb_msg;
 
 void send_ss7_test_msg(void);
 void send_isdn_test_msg(void);
@@ -276,9 +277,10 @@ static void ss7_netconn_thread(void *arg)
 void server_interface_init(void)
 {   
     hb_msg_init();
+    //period_10s_proc(NULL);
     sys_thread_new("ss7_netconn", ss7_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
     sys_thread_new("isdn_netconn", isdn_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
-    //sys_thread_new("other_netconn", other_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
+    
 }
 
 static void init_msg_ip_head(union updmsg *msg, ip4_addr_t *dst_addr, u16_t dst_port)
@@ -301,6 +303,9 @@ static void init_msg_ip_head(union updmsg *msg, ip4_addr_t *dst_addr, u16_t dst_
 void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len)
 {
     ip4_addr_t dst_addr;
+    
+    if (ss7_conn == NULL)
+        return;
 
     struct netbuf *net_buf = netbuf_new();
     u16_t tot_len = sizeof(struct ss7_msg) + len + 3;
@@ -332,6 +337,9 @@ void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len)
 void send_other_msg(struct other_msg *msg, u8_t len)
 {
     ip4_addr_t dst_addr;
+    
+    if (ss7_conn == NULL)
+        return;
 
     struct netbuf *net_buf = netbuf_new();
     u16_t tot_len = sizeof(struct ip_head) + len;
@@ -359,6 +367,9 @@ void send_other_msg(struct other_msg *msg, u8_t len)
 void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len)
 {
     ip4_addr_t dst_addr;
+    
+    if (isdn_conn == NULL)
+        return;
 
     struct netbuf *net_buf = netbuf_new();
     u16_t tot_len = sizeof(struct isdn_msg) + len - 3;
@@ -478,6 +489,23 @@ void send_dtmf_to_msc(u8_t slot, u8_t dtmf)
     send_other_msg((struct other_msg *)&dtmf_msg, 0);
 }
 
+void update_no1_e1(u8_t new_value)
+{
+    u8_t nbit, obit;
+
+    if (new_value != e1_params.no1_enable[card_id & 0x10]) {
+        for (u8_t i = 0; i < 8; i++) {
+            obit = (e1_params.no1_enable[card_id & 0x10] >> i) & 1;
+            nbit = (new_value >> i) & 1;
+            if (obit != nbit) {
+                e1_port_init(i);
+            }
+        }    
+    }
+
+    e1_params.no1_enable[card_id & 0x10] = new_value;
+}
+
 #define CONNECT_TONE_FLAG   1
 #define CONNECT_DTMF_FLAG   2
 #define DECODE_DTMF_FLAG    3
@@ -508,7 +536,7 @@ void connect_tone_proc(u8_t st_slot, u8_t end_slot)
             cadence = (tone[2 + cadence_byte]) >> (7 - cadence_bit);
             dslot = slot_params[slot].dslot_ctone;
 
-            con_port = (dslot >> 5) + (slot_params[slot].dmodule_ctone & 0xf) << 3;
+            con_port = (dslot >> 5) + ((slot_params[slot].dmodule_ctone & 0xf) << 3);
             con_slot = dslot & 0x1f;
 
             if (cadence & 1) {
@@ -605,7 +633,7 @@ void send_card_heartbeat(u8_t dst_flag)
     hb_msg.component.e1_l2_alarm = ram_params.e1_l2_alarm;
     hb_msg.component.e1_l1_alarm = ram_params.e1_l1_alarm;
 
-    send_trap_msg(&hb_msg, dst_flag);
+    send_trap_msg(dst_flag);
 }
 
 /* 20ms period */
@@ -632,6 +660,24 @@ void ls_scan(int e1_no)
     }
 
     send_lsin_to_msc(e1_no);
+}
+
+void mfc_scan(void)
+{
+    u8_t start_pos = TONE_E1 << 5;
+    u8_t change_flag = 0;
+
+    for (u8_t i = 0; i < 31; i++) {
+        slot_params[start_pos + i].old_mfc_par = read_dtmf(i);
+        if (slot_params[start_pos + i].mfc_value != slot_params[start_pos + i].old_mfc_par) {
+            slot_params[start_pos + i].mfc_value = slot_params[start_pos + i].old_mfc_par;
+            change_flag = 1;
+        }
+    }
+
+    if (change_flag) {
+        send_mfc_par_to_msc(TONE_E1);
+    }
 }
 
 /* run at 50ms period */
@@ -737,7 +783,82 @@ void alarm_fsm(u8_t proc)
     }
 }
 
-void period_50ms_proc(void)
+void update_e1_l1_status(void)
 {
-    
+    u8_t l1_status = 0;
+
+    for (u8_t i = 0; i < E1_LINKS_MAX; i++) {
+        l1_status |= (read_liu_status(i) << i);
+    }
+
+    ram_params.e1_l1_alarm = l1_status;
+}
+
+void update_e1_l2_status(void)
+{
+    u8_t l2_status = 0;
+
+    for (u8_t i = 0; i < E1_LINKS_MAX; i++) {
+        l2_status |= (read_l2_status(i) << i);
+    }
+
+    ram_params.e1_l2_alarm = l2_status;
+}
+
+void period_50ms_proc(void *arg)
+{
+    (void)arg;
+    static u8_t proc = 0;
+
+    connect_tone_proc(0, 255);
+    alarm_fsm(proc);
+    proc = (proc + 1) & 0xF;
+
+    sys_timeout(50, period_50ms_proc, NULL);
+}
+
+void period_20ms_proc(void *arg)
+{
+    (void)arg;
+
+    for(int i = 0; i < E1_LINKS_MAX; i++) {
+        ls_scan(i);
+    }
+
+    mfc_scan();
+
+    sys_timeout(20, period_20ms_proc, NULL);
+}
+
+void period_500ms_proc(void *arg)
+{
+    (void)arg;
+
+    update_e1_l1_status();
+
+    update_e1_l2_status();
+
+    set_card_e1_led();
+
+    sys_timeout(500, period_500ms_proc, NULL);
+}
+
+void period_10s_proc(void *arg)
+{
+    //static u8_t pingpang = 2;
+
+    (void)arg;
+
+#if 0   
+    if (pingpang == 2) {
+        send_card_heartbeat(pingpang);
+        pingpang = plat_no;
+    } else {
+        send_card_heartbeat(pingpang);
+        pingpang = 2;
+    }
+#endif
+    send_card_heartbeat(2);
+    CARD_DEBUGF(MTP_DEBUG, ("perioad 10s timeout\n"));
+    sched_timeout(10000, period_10s_proc, NULL);
 }

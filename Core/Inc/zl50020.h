@@ -70,4 +70,6 @@ extern void conf_module_detect(void);
 
 extern u8_t read_dtmf(u8_t slot);
 
+extern void set_card_e1_led(void);
+
 #endif /* INC_ZL50020_H_ */
