@@ -140,12 +140,12 @@ static void other_netconn_thread(void *arg)
     netconn_bind(conn, IP4_ADDR_ANY, OTHER_UDP_PORT);
 
     CARD_ERROR("other_netconn: invalid conn", (conn != NULL), return;);
-    other_conn = conn;
+    //other_conn = conn;
 
     do {
         err = netconn_recv(conn, &buf);
         if (err == ERR_OK) {
-            other_receive(conn, buf->p, &buf->addr, buf->port);
+            other_receive(conn, buf->p, &buf->addr);
         }
 
         if (buf != NULL) {
@@ -280,7 +280,7 @@ void server_interface_init(void)
     //period_10s_proc(NULL);
     sys_thread_new("ss7_netconn", ss7_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
     sys_thread_new("isdn_netconn", isdn_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
-    
+    //sys_thread_new("other_netconn", other_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
 }
 
 static void init_msg_ip_head(union updmsg *msg, ip4_addr_t *dst_addr, u16_t dst_port)
@@ -698,7 +698,7 @@ void alarm_fsm(u8_t proc)
             hb_msg.cp_id = component_id[proc];
             hb_msg.alarm_code = 0;
             need_alarm_omc[proc] = 0;
-            send_card_heartbeat(2); //send to omc
+            send_card_heartbeat(TO_OMC); //send to omc
         }
         if (alarm_code[proc] != IDLE) {
             hb_msg.cp_id = component_id[proc];
@@ -713,7 +713,7 @@ void alarm_fsm(u8_t proc)
             hb_msg.cp_id = component_id[proc];
             hb_msg.alarm_code = alarm_code[proc];
             need_alarm_omc[proc] = 0;
-            send_card_heartbeat(2); // to omc
+            send_card_heartbeat(TO_OMC); // to omc
         }
         if (alarm_code[proc] == IDLE) {
             hb_msg.cp_id = component_id[proc];
@@ -814,7 +814,7 @@ void period_50ms_proc(void *arg)
     alarm_fsm(proc);
     proc = (proc + 1) & 0xF;
 
-    sys_timeout(50, period_50ms_proc, NULL);
+    sched_timeout(50, period_50ms_proc, NULL);
 }
 
 void period_20ms_proc(void *arg)
@@ -827,7 +827,7 @@ void period_20ms_proc(void *arg)
 
     mfc_scan();
 
-    sys_timeout(20, period_20ms_proc, NULL);
+    sched_timeout(20, period_20ms_proc, NULL);
 }
 
 void period_500ms_proc(void *arg)
@@ -840,25 +840,23 @@ void period_500ms_proc(void *arg)
 
     set_card_e1_led();
 
-    sys_timeout(500, period_500ms_proc, NULL);
+    sched_timeout(500, period_500ms_proc, NULL);
 }
 
 void period_10s_proc(void *arg)
 {
-    //static u8_t pingpang = 2;
+    static u8_t pingpang = TO_OMC;
 
     (void)arg;
 
-#if 0   
-    if (pingpang == 2) {
+    if (pingpang == TO_OMC) {
         send_card_heartbeat(pingpang);
         pingpang = plat_no;
     } else {
         send_card_heartbeat(pingpang);
-        pingpang = 2;
+        pingpang = TO_OMC;
     }
-#endif
-    send_card_heartbeat(2);
+
     CARD_DEBUGF(MTP_DEBUG, ("perioad 10s timeout\n"));
     sched_timeout(10000, period_10s_proc, NULL);
 }

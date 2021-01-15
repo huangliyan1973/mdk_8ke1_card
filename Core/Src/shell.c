@@ -220,7 +220,7 @@ static void shell_thread(void *arg)
 
     conn = netconn_new(NETCONN_TCP);
     LWIP_ERROR("shell: invalid conn", (conn != NULL), return;);
-    err = netconn_bind(conn, IP_ADDR_ANY, 5500);
+    err = netconn_bind(conn, IP_ADDR_ANY, 23);
 
     LWIP_ERROR("shell: netconn_bind failed", (err == ERR_OK), netconn_delete(conn); return;);
     err = netconn_listen(conn);

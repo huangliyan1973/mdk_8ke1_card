@@ -6,6 +6,7 @@
 
 #define  MSG_DEBUG
 
+#define  TO_OMC				2
 #define  SS7_UDP_PORT		4950
 #define	 ISDN_UDP_PORT		4951
 #define  SNMP_UDP_PORT		4957
