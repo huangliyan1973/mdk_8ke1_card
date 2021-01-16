@@ -22,6 +22,7 @@
 #include "eeprom.h"
 #include "server_interface.h"
 #include "card_debug.h"
+#include "sched.h"
 
 #define MTP_DEBUG                1
 
@@ -242,13 +243,13 @@ static void t202_expire(void *data)
 	mtp2_t *m = (mtp2_t *)data;
 
 	/* Start the TEI request timer. */
-    sys_timeout(2000, t202_expire, m);
+    sched_timeout(2000, t202_expire, m);
 
 	++m->n202_counter;
 
 	/* Max numer of transmissions of the TEI identity request message  = 3 */
 	if (m->n202_counter > 3) {
-		sys_untimeout(t202_expire, m);
+		sched_untimeout(t202_expire, m);
 		CARD_DEBUGF(MTP_DEBUG, ("%d E1 Unable to receive TEI from network in state %d(%s)!\r\n",
 			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
 
@@ -436,34 +437,34 @@ static void reschedule_t200(mtp2_t *m)
 {
 	CARD_DEBUGF(MTP_DEBUG, ("-- Restarting T200 timer\r\n"));
 
-    sys_untimeout(t200_expire, m);
-    sys_timeout(1000, t200_expire, m);
+    sched_untimeout(t200_expire, m);
+    sched_timeout(1000, t200_expire, m);
 }
 
 static void start_t203(mtp2_t *m)
 {
 	CARD_DEBUGF(MTP_DEBUG, ("-- Starting T203 timer\r\n"));
-    sys_untimeout(t203_expire, m);
-    sys_timeout(10000, t203_expire, m);
+    sched_untimeout(t203_expire, m);
+    sched_timeout(10000, t203_expire, m);
 }
 
 static void stop_t203(mtp2_t *m)
 {
     CARD_DEBUGF(MTP_DEBUG, ("-- Stopping T203 timer\r\n"));
-    sys_untimeout(t203_expire, m);
+    sched_untimeout(t203_expire, m);
 }
 
 static void start_t200(mtp2_t *m)
 {
 	CARD_DEBUGF(MTP_DEBUG, ("-- Starting T200 timer\r\n"));
-	sys_untimeout(t200_expire, m);
-    sys_timeout(1000, t200_expire, m);
+	sched_untimeout(t200_expire, m);
+    sched_timeout(1000, t200_expire, m);
 }
 
 static void stop_t200(mtp2_t *m)
 {
     CARD_DEBUGF(MTP_DEBUG, ("-- Stopping T200 timer\r\n"));
-    sys_untimeout(t200_expire, m);
+    sched_untimeout(t200_expire, m);
 }
 
 /*!
@@ -514,7 +515,7 @@ static void restart_timer_expire(void *data)
 
 static void restart_timer_stop(mtp2_t *m)
 {
-    sys_untimeout(restart_timer_expire, m);
+    sched_untimeout(restart_timer_expire, m);
 }
 
 /*! \note Only call on the transition to state Q921_TEI_ASSIGNED or already there. */
@@ -523,8 +524,8 @@ static void restart_timer_start(mtp2_t *m)
 	CARD_DEBUGF(MTP_DEBUG, ("%d E1 SAPI/TEI=%d/%d Starting link restart delay timer\r\n",
 			m->e1_no, m->sapi, m->tei));
 
-	sys_untimeout(restart_timer_expire, m);
-    sys_timeout(1000, restart_timer_expire, m);
+	sched_untimeout(restart_timer_expire, m);
+    sched_timeout(1000, restart_timer_expire, m);
 }
 
 /*! \note Only call on the transition to state Q921_TEI_ASSIGNED or already there. */
@@ -1157,7 +1158,7 @@ static void q921_mdl_error(mtp2_t *m, char error)
 	}
 	m->mdl_error = error;
 	//m->mdl_timer = sched_add(q921_sched, 1, q921_mdl_handle_error_callback, m);
-	sys_timeout(2, q921_mdl_handle_error_callback, m);
+	sched_timeout(2, q921_mdl_handle_error_callback, m);
 }
 
 static void t200_expire(void *data)
@@ -1313,11 +1314,11 @@ static void t201_expire(void *data)
 	mtp2_t *m = (mtp2_t *)m;
 
 	/* Start the TEI check timer. */
-	sys_timeout(1000, t201_expire, m);
+	sched_timeout(1000, t201_expire, m);
 
 	++m->t201_expirycnt;
 	if (Q921_TEI_CHECK_MAX_POLLS < m->t201_expirycnt) {
-		sys_untimeout(t201_expire, m);
+		sched_untimeout(t201_expire, m);
 
 		switch (m->tei_check) {
 		case Q921_TEI_CHECK_DEAD:

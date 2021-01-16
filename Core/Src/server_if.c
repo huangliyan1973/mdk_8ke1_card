@@ -545,8 +545,10 @@ void connect_tone_proc(u8_t st_slot, u8_t end_slot)
             } 
 
             if (con_port == TONE_E1 && con_slot ==  TONE_SILENT) {
+                ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_INACTIVE);
                 connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
             } else {
+                ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_ACTIVE);
                 connect_tone(slot & 0x1f, slot >> 5, con_slot, TONE_STREAM); // ???
             }
             slot_params[slot].ct_delay++;
@@ -554,8 +556,10 @@ void connect_tone_proc(u8_t st_slot, u8_t end_slot)
                 slot_params[slot].ct_delay = 0;
                 slot_params[slot].connect_tone_flag = 0xF0;
                 if (con_port == TONE_E1 && con_slot == TONE_SILENT) {
+                    ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_INACTIVE);
                     connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
                 } else {
+                    ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_ACTIVE);
                     connect_tone(slot & 0x1f, slot >> 5, con_slot, TONE_STREAM); //???
                 }
             } else if (slot_params[slot].ct_delay >= tone[1]) {
@@ -577,11 +581,14 @@ void connect_tone_proc(u8_t st_slot, u8_t end_slot)
                     con_slot = dslot & 0x1f;
 
                     if (con_port == TONE_E1 && con_slot == TONE_SILENT) {
+                        ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_INACTIVE);
                         connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
                     } else {
+                        ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_ACTIVE);
                         connect_tone(slot & 0x1f, slot >> 5, con_slot, TONE_STREAM); //???
                     }
                 } else {
+                    ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_INACTIVE);
                     connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
                     slot_params[slot].dtmf_space_delay--;
                 }

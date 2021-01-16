@@ -148,13 +148,14 @@ u32_t sched_timeouts_sleeptime(void)
         return ret;
     }
 }
-
+#if 0
 static void test_fun(void *arg)
 {
     (void)arg;
     CARD_DEBUGF(1, ("100ms timeout\n"));
     sched_timeout(100,test_fun,NULL);
 }
+#endif
 
 static void sched_timeout_thread(void *arg)
 {
@@ -163,12 +164,13 @@ static void sched_timeout_thread(void *arg)
     (void)arg;
 
     CARD_DEBUGF(1, ("sched timeout thread start!\n"));
-    sched_timeout(100,test_fun,NULL);
+    //sched_timeout(100,test_fun,NULL);
 
     for(;;) {
         sleep_time = sched_timeouts_sleeptime();
         if (sleep_time == TIMEOUT_INFINITE) {
-            osDelay(100);
+            //osDelay(100);
+            osThreadYield();
         } else if (sleep_time > 0) {
             osDelay(sleep_time);
         } else {

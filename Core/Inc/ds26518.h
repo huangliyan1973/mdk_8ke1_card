@@ -1406,4 +1406,6 @@ extern u32_t check_rx_change(int e1_no);
 
 extern u8_t read_liu_status(int e1_no);
 
+extern void ds26518_tx_rx_poll(int e1_no);
+
 #endif /* Build for Specific Driver */

@@ -161,7 +161,8 @@ static void card_debug_thread(void *arg)
     if (len > 0) {
       HAL_UART_Transmit(&huart1, buf, len, 0xfffffffe);
     } else {
-      osDelay(1);
+      //osDelay(1);
+      osThreadYield();
     }
   }
 }

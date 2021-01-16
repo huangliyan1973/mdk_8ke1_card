@@ -340,7 +340,7 @@ extern void e1_port_init(int e1_no);
 
 extern sys_mutex_t lock_mtp_core;
 
-#define LOCK_MTP2_CORE()	sys_mutex_lock(&lock_mtp_core)
-#define UNLOCK_MTP2_CORE()  sys_mutex_unlock(&lock_mtp_core)
+//#define LOCK_MTP2_CORE()	sys_mutex_lock(&lock_mtp_core)
+//#define UNLOCK_MTP2_CORE()  sys_mutex_unlock(&lock_mtp_core)
 
 #endif

@@ -13,6 +13,7 @@
 #include "sram.h"
 #include "eeprom.h"
 #include "server_interface.h"
+#include "sched.h"
 
 #define MTP_NEXT_SEQ(x) (((x) + 1) % 128)
 
@@ -25,11 +26,14 @@
 #define T7_TIMEOUT      1500
 #define T17_TIMEOUT     1200
 
+#define MTP2_POLL_ENABLE    
+
 static mtp2_t mtp2_state[E1_LINKS_MAX] __attribute__((at(SRAM_BASE_ADDR)));
 
+#if 0
 static sys_mbox_t mtp_mbox;
 sys_mutex_t lock_mtp_core;
-osSemaphoreId	mtp_semaphore = NULL;
+#endif
 
 static void abort_initial_alignment(mtp2_t *m);
 static void start_initial_alignment(mtp2_t *m, char* reason);
@@ -77,7 +81,7 @@ static void mtp2_t4_timeout(void *arg)
     CARD_DEBUGF(MTP_DEBUG, ("Proving successful on link %"U16_F"\n", m->e1_no));
 
     m->state = MTP2_READY;
-    sys_timeout(T1_TIMEOUT, mtp2_t1_timeout, m);
+    sched_timeout(T1_TIMEOUT, mtp2_t1_timeout, m);
 }
 
 /* Q.703 timer T7 "excessive delay of acknowledgement" . */
@@ -100,12 +104,12 @@ static void mtp2_t17_timeout(void *arg)
 
 static void mtp2_cleanup(mtp2_t *m)
 {
-    sys_untimeout(mtp2_t1_timeout, m);
-    sys_untimeout(mtp2_t2_timeout, m);
-    sys_untimeout(mtp2_t3_timeout, m);
-    sys_untimeout(mtp2_t4_timeout, m);
-    sys_untimeout(mtp2_t7_timeout, m);
-    sys_untimeout(mtp2_t17_timeout, m);
+    sched_untimeout(mtp2_t1_timeout, m);
+    sched_untimeout(mtp2_t2_timeout, m);
+    sched_untimeout(mtp2_t3_timeout, m);
+    sched_untimeout(mtp2_t4_timeout, m);
+    sched_untimeout(mtp2_t7_timeout, m);
+    sched_untimeout(mtp2_t17_timeout, m);
 
     CARD_DEBUGF(MTP_DEBUG, ("mtp2 cleanup on link '%d'\n", m->e1_no));
 }
@@ -118,7 +122,7 @@ static void abort_initial_alignment(mtp2_t *m)
     mtp2_cleanup(m);
     m->state = MTP2_DOWN;
     /* Retry the initial alignment after a small delay. */
-    sys_timeout(T17_TIMEOUT, mtp2_t17_timeout, m);
+    sched_timeout(T17_TIMEOUT, mtp2_t17_timeout, m);
     CARD_DEBUGF(MTP_DEBUG, ("Aborted initial alignment on link '%d'\n", m->e1_no));
 }
 
@@ -149,7 +153,7 @@ static void mtp3_link_fail(mtp2_t *m, int down)
     /* For now, restart initial alignment after a small delay. */
     if (down) {
         m->state = MTP2_DOWN;
-        sys_timeout(T17_TIMEOUT, mtp2_t17_timeout, m);
+        sched_timeout(T17_TIMEOUT, mtp2_t17_timeout, m);
     } else
         m->state = MTP2_NOT_ALIGNED;
 
@@ -172,7 +176,7 @@ static void start_initial_alignment(mtp2_t *m, char* reason)
     m->bsn_errors = 0;
 
     CARD_DEBUGF(MTP_DEBUG, ("Starting initial alignment on link '%d', reason: %s.\n", m->e1_no, reason));
-    sys_timeout(T2_TIMEOUT, mtp2_t2_timeout, m);
+    sched_timeout(T2_TIMEOUT, mtp2_t2_timeout, m);
 }
 
 /* Find a frame to transmit and put it in the transmit buffer.
@@ -293,7 +297,7 @@ void mtp2_queue_msu(u8_t e1_no, u8_t sio, u8_t *sif, int len)
 	if(m->retrans_seq == -1) {
 		m->retrans_seq = i;
 		/* Start timer T7 "excessive delay of acknowledgement". */
-        sys_timeout(T7_TIMEOUT, mtp2_t7_timeout, m);
+        sched_timeout(T7_TIMEOUT, mtp2_t7_timeout, m);
 	}
 }
 
@@ -307,8 +311,8 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
     case 0:                   /* Status indication 'O' */
         if (m->state == MTP2_NOT_ALIGNED) {
             
-            sys_untimeout(mtp2_t2_timeout, m);
-            sys_timeout(T3_TIMEOUT, mtp2_t3_timeout, m);
+            sched_untimeout(mtp2_t2_timeout, m);
+            sched_timeout(T3_TIMEOUT, mtp2_t3_timeout, m);
             m->state = MTP2_ALIGNED;
             CARD_DEBUGF(MTP_DEBUG, ("Got status indication 'O' while NOT_ALIGNED  0 on link %d. \n", m->e1_no));
         
@@ -332,16 +336,16 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
 
         if (m->state == MTP2_NOT_ALIGNED) {
 
-            sys_untimeout(mtp2_t2_timeout, m);
-            sys_timeout(T3_TIMEOUT, mtp2_t3_timeout, m);
+            sched_untimeout(mtp2_t2_timeout, m);
+            sched_timeout(T3_TIMEOUT, mtp2_t3_timeout, m);
             m->state = MTP2_ALIGNED;
             CARD_DEBUGF(MTP_DEBUG, ("Got status indication 'N' or 'E' while NOT_ALIGNED on link %d. \n", m->e1_no));
         
         } else if (m->state == MTP2_ALIGNED) {
 
             CARD_DEBUGF(MTP_DEBUG, ("Entering proving state for link '%d'.\n", m->e1_no));
-            sys_untimeout(mtp2_t3_timeout, m);
-            sys_timeout(T4_TIMEOUT, mtp2_t4_timeout, m);
+            sched_untimeout(mtp2_t3_timeout, m);
+            sched_timeout(T4_TIMEOUT, mtp2_t4_timeout, m);
             m->state = MTP2_PROVING;
         
         } else if (m->state == MTP2_INSERVICE) {
@@ -450,8 +454,8 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
     if (m->state != MTP2_INSERVICE) {
         if (m->state == MTP2_READY) {
 
-            sys_untimeout(mtp2_t1_timeout, m);
-            sys_untimeout(mtp2_t7_timeout, m);
+            sched_untimeout(mtp2_t1_timeout, m);
+            sched_untimeout(mtp2_t7_timeout, m);
             
             m->send_fib = bib;
             m->send_bsn = fsn;
@@ -466,8 +470,8 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
         }
     } else if(m->state == MTP2_READY) {
 
-        sys_untimeout(mtp2_t1_timeout, m);
-        sys_untimeout(mtp2_t7_timeout, m);
+        sched_untimeout(mtp2_t1_timeout, m);
+        sched_untimeout(mtp2_t7_timeout, m);
     
     }
 
@@ -490,10 +494,10 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
     /* Reset timer T7 if new acknowledgement received (Q.703 (5.3.1) last
        paragraph). */
     if(m->retrans_last_acked != bsn) {
-        sys_untimeout(mtp2_t7_timeout, m);
+        sched_untimeout(mtp2_t7_timeout, m);
         m->retrans_last_acked = bsn;
         if(m->retrans_last_acked != m->retrans_last_sent) {
-            sys_timeout(T7_TIMEOUT, mtp2_t7_timeout, m);
+            sched_timeout(T7_TIMEOUT, mtp2_t7_timeout, m);
         }
     }
 
@@ -593,15 +597,6 @@ static void mtp2_read_su(mtp2_t *m, u8_t *buf, int len)
 	mtp2_good_frame(m, buf, len);
 }
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    /* PA5 for DS26518 INTERRUPT */
-	if (GPIO_Pin == GPIO_PIN_5) {
-		//ds26518_isr();
-        osSemaphoreRelease(mtp_semaphore);
-	}
-}
-
 static void prepare_init_link(int e1_no)
 {
     if (e1_no >= E1_LINKS_MAX) {
@@ -660,9 +655,17 @@ mtp2_t *get_mtp2_state(u8_t link_no)
     return &mtp2_state[link_no];
 }
 
-static void mtp_thread_handle_msg(struct ss7_msg *msg)
-{
+#ifndef MTP2_POLL_ENABLE
 
+osSemaphoreId	mtp_semaphore = NULL;
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+    /* PA5 for DS26518 INTERRUPT */
+	if (GPIO_Pin == GPIO_PIN_5) {
+		//ds26518_isr();
+        osSemaphoreRelease(mtp_semaphore);
+	}
 }
 
 void mtp_lowlevel_scan(void *arg)
@@ -688,33 +691,36 @@ static void mtp_lowlevel_init(void)
     osThreadNew(mtp_lowlevel_scan, NULL, &attributes);
 }
 
+#else
+
 static void mtp2_thread(void *arg)
 {
-    struct ss7_msg *msg;
     LWIP_UNUSED_ARG(arg);
 
-    ds26518_global_init();
-    for(int index = 0; index < E1_LINKS_MAX; index++) {
-        e1_port_init(index);
-    }
+    mtp2_t *m;
+    TickType_t  xPeriod = pdMS_TO_TICKS(2); //2ms 运行一次
+	TickType_t xLastWakeTime;
+	xLastWakeTime = xTaskGetTickCount();
 
-    LOCK_MTP2_CORE();
     for (;;) {
-        UNLOCK_MTP2_CORE();
-        sys_arch_mbox_fetch(&mtp_mbox, (void **)&msg, 0);
-        LOCK_MTP2_CORE();
-        if (msg == NULL) {
-            CARD_DEBUGF(MTP_DEBUG, ("mtp2 thread: invalid message: NULL\n"));
-            CARD_ASSERT("mtp2_thread: invalid message", 0);
-            continue;
-        }
-
-        mtp_thread_handle_msg(msg);
+       vTaskDelayUntil(&xLastWakeTime, xPeriod);
+       for(int i = 0; i < E1_LINKS_MAX; i++) {
+           m = &mtp2_state[i];
+           if ((m == NULL) || (m->protocal == NO1_PROTO_TYPE) ||
+                (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_DOWN) ||
+                (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_TEI_UNASSIGNED)) {
+                    continue;
+                }
+            ds26518_tx_rx_poll(i);
+       }
     }
 }
 
+#endif
+
 void mtp_init(void)
 {
+#if 0
     if (sys_mbox_new(&mtp_mbox, MTP_MBOX_SIZE) != ERR_OK) {
         CARD_ASSERT("failed to create mtp thread mbox", 0);
     }
@@ -722,12 +728,19 @@ void mtp_init(void)
     if (sys_mutex_new(&lock_mtp_core) != ERR_OK) {
         CARD_ASSERT("failed to create lock_mtp_core", 0);
     }
+#endif
 
+    ds26518_global_init();
+    for(int index = 0; index < E1_LINKS_MAX; index++) {
+        e1_port_init(index);
+    }
+
+#ifndef MTP2_POLL_ENABLE
     mtp_semaphore = osSemaphoreNew(1, 1, NULL);
-
     mtp_lowlevel_init();
-
+#else
     sys_thread_new("mtp2", mtp2_thread, NULL, DEFAULT_THREAD_STACKSIZE, osPriorityNormal);
+#endif
 }
 
 void mtp2_command(u8_t e1_no, u8_t command)
@@ -822,6 +835,7 @@ void bad_msg_rev(u8_t e1_no, u8_t err)
      3: Abort.
      4: Overrun.
     */
+   CARD_DEBUGF(MTP_DEBUG,("%d E1 Receive error, err_no=%d\n", e1_no, err));
 }
 
 u8_t read_l2_status(int e1_no)
@@ -829,7 +843,7 @@ u8_t read_l2_status(int e1_no)
     mtp2_t *m = &mtp2_state[e1_no];
 
     if (m->protocal == NO1_PROTO_TYPE) {
-        return 0;
+        return 1;
     }
 
     if (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_INSERVICE) {

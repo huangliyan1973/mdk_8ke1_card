@@ -152,6 +152,17 @@ void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 		return;
 	}
 
+	u8_t index = (u8_t)(slot >> 3);
+	u8_t bit_mask = (1 << (u8_t)(slot & 0x7));
+	//u8_t *tcice = &(f->tcice[index]);
+
+	if (active == VOICE_ACTIVE) {
+		f->tcice[index] &= (~bit_mask);
+	} else {
+		f->tcice[index] |= bit_mask;
+	}
+
+#if 0
 	uint32_t *val = (uint32_t *)&(f->tcice[0]);
 	uint32_t mask = (uint32_t)(1L << (slot & 0x1F));
 
@@ -161,6 +172,7 @@ void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 		*val = (*val) | mask;
 	}
 	CARD_DEBUGF(MTP_DEBUG, ("tcice value = %04X\n", *val));
+#endif
 }
 
 
@@ -711,6 +723,40 @@ void ds26518_isr(void)
 
 			l->llsr = llsr;
 		}
+	}
+}
+
+/* Below for Ds26518 poll function */
+
+void ds26518_tx_rx_poll(int e1_no)
+{
+	FRAMER *f = ds26518_framer(e1_no & 7);
+
+	u8_t rv_status = f->rhpba;
+	u8_t rv_len = rv_status & 0x7f;
+
+	if (rv_status != 0x80) {
+		while (rv_len > 0) {
+			rv_ccs_byte(e1_no, f->rhf);
+			rv_len--;
+		}
+
+		if ((rv_status & RHPBA_MS) == 0) {
+			rv_status = ((f->rrts5) >> 4) & 0x7;
+			if (rv_status == 1) {
+				check_ccs_msg(e1_no);
+			} else if (rv_status > 0) {
+				bad_msg_rev(e1_no, rv_status);
+			} 
+		}
+	}
+	
+	u8_t count = f->tfba;
+	if (count > 0) {
+		if(f->thc1 & THC1_TEOM){
+			f->thc1 &= (~THC1_TEOM);
+		}
+		send_ccs_msg(e1_no, count);
 	}
 }
 

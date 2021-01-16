@@ -131,6 +131,7 @@ int main(void)
   MX_FSMC_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
+  HAL_Delay(1000);
   card_id = 0;
   init_eeprom();
   test_sram();

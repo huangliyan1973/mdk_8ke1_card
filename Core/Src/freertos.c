@@ -29,6 +29,7 @@
 #include "shell.h"
 #include "server_interface.h"
 #include "sched.h"
+#include "mtp.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -68,8 +69,9 @@ void start_user_thread(void)
     MX_LWIP_Init();
     snmp_8ke1_init();
     server_interface_init();
-    shell_init();
+    //shell_init();
     sched_timeout_init();
+    mtp_init();
 }
 /* USER CODE END FunctionPrototypes */
 
