@@ -1408,4 +1408,6 @@ extern u8_t read_liu_status(int e1_no);
 
 extern void ds26518_tx_rx_poll(int e1_no);
 
+extern void ds26518_test(void);
+
 #endif /* Build for Specific Driver */

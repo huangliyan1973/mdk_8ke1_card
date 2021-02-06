@@ -21,13 +21,8 @@
 #include "usart.h"
 
 /* USER CODE BEGIN 0 */
-#include <stdio.h>
-#include <stdarg.h>
-#include <string.h>
-#include "lffifo.h"
-#include "cmsis_os2.h"
-
-static struct lffifo  *tx_buf;
+#include <stdint.h>
+#include "ulog.h"
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart1;
@@ -128,51 +123,26 @@ set to 'Yes') calls __io_putchar() */
 #endif /* __GNUC__ */
 PUTCHAR_PROTOTYPE
 {
-	//HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xff);
-    ITM_SendChar(ch);
+	HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xffff);
 	return ch;
 }
 
+static struct ulog_backend console = {0};
 
-void card_printf(const char *fmt, ...)
+void ulog_console_backend_output(struct ulog_backend *backend, const char *log_buf, size_t log_len)
 {
-  char buf[512];
-
-  va_list  ap;
-  va_start(ap, fmt);
-  vsprintf(buf, fmt, ap);
-  va_end(ap);
-
-  if (tx_buf) {
-    lffifo_put(tx_buf, (u8_t *)buf, strlen(buf));
-  }
+  HAL_UART_Transmit(&huart1, (uint8_t *)log_buf, log_len, 0xffff);
 }
 
-
-static void card_debug_thread(void *arg)
+int ulog_console_backend_init(void)
 {
-  u16_t len;
-  u8_t buf[512];
-    
-  card_printf("System run at %d frequence.\n", SystemCoreClock);
-  
-  for(;;) {
-    len = lffifo_get(tx_buf, buf, 512);
-    if (len > 0) {
-      HAL_UART_Transmit(&huart1, buf, len, 0xfffffffe);
-    } else {
-      //osDelay(1);
-      osThreadYield();
-    }
-  }
-}
+  ulog_init();
+  console.output = ulog_console_backend_output;
 
-void card_debug_init(void)
-{
-  tx_buf = lffifo_alloc(2048);
-  sys_thread_new("card_debug", card_debug_thread, NULL, 2048, osPriorityNormal-1);
-}
+  ulog_backend_register(&console, "uart1", 1);
 
+  return 0;
+}
 
 /* USER CODE END 1 */
 

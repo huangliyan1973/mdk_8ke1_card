@@ -11,10 +11,14 @@
 #include "ds26518.h"
 #include "main.h"
 #include "usart.h"
-#include "card_debug.h"
+
 #include "mtp.h"
 #include "lwip/sys.h"
 #include "lwip/def.h"
+
+#define LOG_TAG              "ds26518"
+#define LOG_LVL              LOG_LVL_DBG
+#include "ulog.h"
 
 /* FSMC_NE2 for ds26518 */
 #define DS26518_BASE			(0x64000000)
@@ -65,9 +69,11 @@ void set_ds26518_interrupt(int e1_no, int enable)
 	if (enable) {
 		f->gfimr1 |= (1 << e1_no);
 		f->glimr1 |= (1 << e1_no);
+		LOG_I("Enable '%d' E1 interrupt", e1_no);
 	} else {
 		f->gfimr1 &= ~(1 << e1_no);
 		f->glimr1 &= ~(1 << e1_no);
+		LOG_I("Disable '%d' E1 interrupt", e1_no);
 	}
 }
 
@@ -76,8 +82,10 @@ void set_ds26518_global_interrupt(int enable)
 	FRAMER *f = ds26518_global_framer();
 	if (enable) {
 		f->gtcr1 &= ~GTCR1_GIPI;
+		LOG_I("Enable E1 global interrupt");
 	} else {
 		f->gtcr1 |= GTCR1_GIPI;
+		LOG_I("Disable E1 global interrupt");
 	}
 }
 
@@ -100,11 +108,13 @@ u8_t read_rx_abcd(int e1_no, u8_t slot)
 
 	FRAMER *f = ds26518_framer(e1_no);
 	
+	u8_t value = f->rs[(slot & 0x10)];
 	if (slot & 0x10) {
-		return  (f->rs[(slot & 0x10)] & 0x0F);
+        LOG_D("'%d' E1 '%d' slot got line code is %2x", e1_no, slot, value & 0x0F);
+		return  (value & 0x0F);
 	}
-
-	return (f->rs[(slot & 0x10)] >> 4);	
+    LOG_D("'%d' E1 '%d' slot got line code is %2x", e1_no, slot, value >> 4);
+	return (value >> 4);
 }
 
 void out_tx_abcd(int e1_no, u8_t slot, u8_t value)
@@ -122,6 +132,9 @@ void out_tx_abcd(int e1_no, u8_t slot, u8_t value)
 	} else {
 		f->ts[slot & 0x10] = (old_value & 0x0F) | (value << 4);
 	}
+
+	LOG_D("'%d' E1 '%d' slot SET line code is %02x, ts value=%02x", 
+        e1_no, slot, value, f->ts[slot & 0x10]);
 }
 
 u32_t check_rx_change(int e1_no)
@@ -130,7 +143,9 @@ u32_t check_rx_change(int e1_no)
 	FRAMER *f = ds26518_framer(e1_no);
 
 	temp = PP_HTONL((u32_t)f->rss[0]);
-	CARD_DEBUGF(MTP_DEBUG, ("RX_ABCD change value = %4X\n", temp));
+	if (temp) {
+	    LOG_D("RX_ABCD change value = %04X", temp);
+    }
 	return temp;
 }
 
@@ -161,6 +176,10 @@ void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 	} else {
 		f->tcice[index] |= bit_mask;
 	}
+
+	LOG_D("'%d' E1 '%d' slot set %s , tcice=%02x %02x %02x %02x",
+        e1_no, slot, active == VOICE_ACTIVE ? "Enable":"Disable", 
+        f->tcice[0], f->tcice[1], f->tcice[2], f->tcice[3]);
 
 #if 0
 	uint32_t *val = (uint32_t *)&(f->tcice[0]);
@@ -304,7 +323,7 @@ void ds26518_global_init(void)
 	dummy = f->idr;		/* delay at least 300 ns */
 	dummy = f->idr;
 
-	CARD_DEBUGF(MTP_DEBUG,("DS26518 ID=%"X8_F"\n", dummy));
+	LOG_D("DS26518 ID=%02X", dummy);
 
 	for(i = 0; i < sizeof(DEVICE); i++, ucp++) {
 		if(i >= 0x00f0 && i <= 0x00ff)
@@ -567,6 +586,9 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	}
 
 	HAL_Delay(1);
+	
+	//for test.
+	//set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
 
 	/* Open interrupt */
 	f->rim1 |= RIM1_RLOSD | RIM1_RLOFD | RIM1_RLOSC | RIM1_RLOFC;
@@ -649,9 +671,31 @@ void ds26518_tx_set(u8_t e1_no, u8_t *buf, u8_t len, u8_t end_flag)
 
 	if (end_flag == 1) {
 		// Last Byte to Send.
-		f->thc1 |= THC1_TEOM; // bit2 of thc1 TEOM
+        f->thc1 |= THC1_TEOM; // bit2 of thc1 TEOM
 	}
 	f->thf = buf[i];
+}
+
+void ds26518_send_sio_test(void)
+{
+	u8_t buf[4] = {0xff, 0xff, 1, 0};
+	FRAMER *f = ds26518_framer(0);
+
+	u8_t count = f->tfba;
+	if (count > 4) {
+		if(f->thc1 & THC1_TEOM){
+			f->thc1 &= (~THC1_TEOM);
+			while (f->thc1 & THC1_TEOM);
+			LOG_I("CLEAR THC1_TEMO flag, thc1=%2X", f->thc1);
+		}
+		for (int i = 0; i < 3; i++) {
+			f->thf = buf[i];
+		}
+
+		f->thc1 |= THC1_TEOM; // bit2 of thc1 TEOM
+		f->thf = buf[3];
+		LOG_I("Send SIO end!");
+	}
 }
 
 void ds26518_isr(void)
@@ -755,9 +799,44 @@ void ds26518_tx_rx_poll(int e1_no)
 	if (count > 0) {
 		if(f->thc1 & THC1_TEOM){
 			f->thc1 &= (~THC1_TEOM);
+			while(f->thc1 & THC1_TEOM);
 		}
 		send_ccs_msg(e1_no, count);
 	}
+}
+
+void ds26518_test(void)
+{
+	
+	FRAMER *f = ds26518_global_framer();
+
+	ds26518_global_init();
+
+	if (f->gsrr1 != 0) {
+		goto fault;
+	}
+
+	if (f->gtcr1 != GTCR1_GIPI) {
+		goto fault;
+	}
+
+	if (f->gfcr1 != (GFCR1_IBOMS(3) | GFCR1_BPCLK(3))) {
+		goto fault;
+	}
+
+	if (f->gtcr3 != 3) {
+		goto fault;
+	}
+
+	if (f->gtccr3 != (GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL)) {
+		goto fault;
+	}
+
+	LOG_I("DS26518 TEST OK!");
+	return;
+
+fault:
+	LOG_E("DS26518 TEST FAILED!");
 }
 
 #if 0

@@ -51,6 +51,8 @@
 #define MEMP_NUM_TCP_PCB 2
 /*----- Value in opt.h for MEM_ALIGNMENT: 1 -----*/
 #define MEM_ALIGNMENT 4
+/*----- Default Value for MEM_SIZE: 1600 ---*/
+#define MEM_SIZE 2600
 /*----- Default Value for MEMP_NUM_RAW_PCB: 4 ---*/
 #define MEMP_NUM_RAW_PCB 2
 /*----- Default Value for MEMP_NUM_TCP_PCB_LISTEN: 8 ---*/

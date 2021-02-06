@@ -1,8 +1,7 @@
 #ifndef MTP_H
 #define MTP_H
 
-#include "lwip/arch.h"
-#include "lwip/timeouts.h"
+#include "lwip/sys.h"
 
 #define E1_LINKS_MAX			8
 #define MTP_MBOX_SIZE 			6
@@ -193,9 +192,12 @@ enum q921_tei_check_state {
 };
 
 /* Max. MTP2 packet size, including sequence numbers */
-#define MTP_MAX_PCK_SIZE 270
-#define U_S_PCK_SIZE	128
-#define U_S_PCK_BUFF_SIZE  32
+//#define MTP_MAX_PCK_SIZE 270
+//#define U_S_PCK_SIZE	128
+
+#define MTP_MAX_PCK_SIZE 64
+#define U_S_PCK_SIZE	32
+#define U_S_PCK_BUFF_SIZE  8
 
 typedef struct mtp2_state{
 	enum {
@@ -339,6 +341,8 @@ extern u8_t read_l2_status(int e1_no);
 extern void e1_port_init(int e1_no);
 
 extern sys_mutex_t lock_mtp_core;
+
+extern void ds26518_send_sio_test(void);
 
 //#define LOCK_MTP2_CORE()	sys_mutex_lock(&lock_mtp_core)
 //#define UNLOCK_MTP2_CORE()  sys_mutex_unlock(&lock_mtp_core)

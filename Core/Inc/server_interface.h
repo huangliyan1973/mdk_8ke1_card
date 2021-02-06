@@ -170,6 +170,10 @@ typedef struct {
 	u8_t				hb_fdl[16];					// 42
 }__attribute__ ((packed)) card_heart_t;
 
+/* STM32F407 PB7 pin control the master clock input */
+#define MASTER_CLK		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET)
+#define SLAVE_CLK		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET)
+
 extern ip4_addr_t  sn0;
 extern ip4_addr_t  sn1;
 extern ip4_addr_t  omc;
@@ -189,5 +193,9 @@ extern void server_interface_init(void);
 extern void update_no1_e1(u8_t new_value);
 
 extern void period_10s_proc(void *arg);
+
+extern void start_period_proc(void);
+
+extern void snmp_8ke1_init(void);
 
 #endif /* INC_CSU_IF_H_ */

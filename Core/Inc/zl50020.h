@@ -12,7 +12,33 @@
 #include "lwip/sys.h"
 
 /* STM32F407 PC7 pin connect with ZL50020 DTA_RDY pin */
-/* STM32F407 PB7 pin control the master clock input */
+
+/* STM32F407 PF7-PF10 LED0,LED1 CONTROL */
+
+#define LED1_GREEN_ON	do {HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_SET); \
+							HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET); } while(0)
+
+#define LED1_RED_ON		do {HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET); \
+							HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_RESET); } while(0)
+
+#define LED1_ORG_ON		do {HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_SET); \
+							HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);} while(0)
+
+#define LED2_GREEN_ON	do {HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET); \
+							HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_RESET);} while(0)
+
+#define LED2_RED_ON		do {HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_SET); \
+							HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET);} while(0)
+
+#define LED2_ORG_ON		do {HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_SET); \
+							HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);} while(0)
+
+#define LED1_OFF        do {HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_RESET); \
+							HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET); } while(0)
+
+#define LED2_OFF        do {HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET); \
+							HAL_GPIO_WritePin(GPIOF, GPIO_PIN_10, GPIO_PIN_RESET);} while(0)
+
 
 #define TONE_E1			7
 #define TONE_SILENT 	31
@@ -71,5 +97,13 @@ extern void conf_module_detect(void);
 extern u8_t read_dtmf(u8_t slot);
 
 extern void set_card_e1_led(void);
+
+extern void zl50020_test(void);
+
+extern void led_test(void);
+
+extern void module_test(void);
+
+extern void zl50020_test1(void);
 
 #endif /* INC_ZL50020_H_ */

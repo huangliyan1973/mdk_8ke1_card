@@ -1,10 +1,7 @@
 #include <string.h>
-#include "FreeRTOS.h"
-#include "task.h"
 #include "main.h"
 #include "cmsis_os.h"
 
-#include "card_debug.h"
 #include "lwip/apps/snmp.h"
 #include "lwip/opt.h"
 #include "lwip/api.h"
@@ -17,6 +14,10 @@
 #include "usart.h"
 #include "eeprom.h"
 #include "server_interface.h"
+
+#define LOG_TAG              "snmp"
+#define LOG_LVL              LOG_LVL_DBG
+#include "ulog.h"
 
 extern ip4_addr_t local_addr;
 
@@ -334,8 +335,7 @@ static snmp_err_t snmp_get_value(struct snmp_varbind *vb)
 {
     u32_t instance;
     u32_t sub_oid;
-    u32_t *oid;
-        
+    
     snmp_err_t  err = snmp_oid_check(vb);
     if (err != SNMP_ERR_NOERROR) {
         return err;
@@ -343,40 +343,33 @@ static snmp_err_t snmp_get_value(struct snmp_varbind *vb)
     
     sub_oid = vb->oid.id[e1_oid_len + 1];
     instance = vb->oid.id[e1_oid_len + 2];
-#if 0   
-    oid = vb->oid.id;
-    u16_t oid_len;
-    CARD_DEBUGF(NET_DEBUG, ("e1_oid_len = %"U16_F"    vb Oid is:\n", e1_oid_len));
-    for (oid_len = 0; oid_len < vb->oid.len; oid_len++) {
-        CARD_DEBUGF(NET_DEBUG, ("%"U32_F".", *oid++));
-    }
-#endif
-    oid = vb->oid.id + e1_oid_len + 2;
-    CARD_DEBUGF(NET_DEBUG, ("\nSnmp Get sub_oid=%"U16_F"\tinstance=%"U16_F"\toid_instance=%"U16_F"\n", sub_oid, instance, *oid));
+
+    //oid = vb->oid.id + e1_oid_len + 2;
+    LOG_I("Snmp Get sub_oid=%d, instance=%d\n", sub_oid, instance);
     
     vb->type = SNMP_ASN1_TYPE_OCTET_STRING;
     
     switch (vb->oid.id[e1_oid_len]) {
         case 2:  /* Config */
             if (sub_oid <= 13 && sub_oid != 7) {
-                if (instance == card_id) {
+                if (instance < E1_CARDS) {
                     vb->value_len = 1;
                     if (sub_oid == 1) {
-                        *(u8_t *)(vb->value) = e1_params.e1_enable[card_id];
+                        *(u8_t *)(vb->value) = e1_params.e1_enable[instance];
                     } else if (sub_oid == 2) {
-                        *(u8_t *)(vb->value) = e1_params.e1_l2_alarm_enable[card_id];
+                        *(u8_t *)(vb->value) = e1_params.e1_l2_alarm_enable[instance];
                     } else if (sub_oid == 3) {
-                        *(u8_t *)(vb->value) = e1_params.e1_port_type[card_id];
+                        *(u8_t *)(vb->value) = e1_params.e1_port_type[instance];
                     } else if (sub_oid == 4) {
-                        *(u8_t *)(vb->value) = e1_params.isdn_port_type[card_id];
+                        *(u8_t *)(vb->value) = e1_params.isdn_port_type[instance];
                     } else if (sub_oid == 5) {
-                        *(u8_t *)(vb->value) = e1_params.pll_src[card_id];
+                        *(u8_t *)(vb->value) = e1_params.pll_src[instance];
                     } else if (sub_oid == 6) {
-                        *(u8_t *)(vb->value) = e1_params.crc4_enable[card_id];
+                        *(u8_t *)(vb->value) = e1_params.crc4_enable[instance];
                     } else if (sub_oid == 13) {
-                        *(u8_t *)(vb->value) = e1_params.no1_enable[card_id];
+                        *(u8_t *)(vb->value) = e1_params.no1_enable[instance];
                     } else if (sub_oid == 8) {
-                        *(u8_t *)(vb->value) = e1_params.mtp2_error_check[card_id];
+                        *(u8_t *)(vb->value) = e1_params.mtp2_error_check[instance];
                     } else {
                         return SNMP_ERR_NOSUCHINSTANCE;
                     }
@@ -427,30 +420,35 @@ static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
     }
     
     sub_oid = vb->oid.id[e1_oid_len + 1];
-    instance = *(u8_t *)(vb->oid.id[e1_oid_len + 2]) & 0xf;
+    instance = vb->oid.id[e1_oid_len + 2];
     value = *(u8_t *)(vb->value);
-    
+
+    LOG_I("Snmp set sub_oid=%d, instance=%d, value=%x\n", sub_oid, instance, value);
+  
     switch (vb->oid.id[e1_oid_len]) {
         case 2: /*config */
             if (sub_oid <= 13 && sub_oid != 7) {
-                if (instance == card_id) {
+                if (instance < E1_CARDS) {
                     if (sub_oid == 1) {
-                        e1_params.e1_enable[card_id] = value ;
+                        e1_params.e1_enable[instance] = value ;
+                        //LOG_W("instance=%d, value=%x, eeprom value=%x", instance, value, e1_params.e1_enable[instance]);
                     } else if (sub_oid == 2) {
-                        e1_params.e1_l2_alarm_enable[card_id] = value ;
+                        e1_params.e1_l2_alarm_enable[instance] = value ;
                     } else if (sub_oid == 3) {
-                        e1_params.e1_port_type[card_id] = value ;
+                        e1_params.e1_port_type[instance] = value ;
                     } else if (sub_oid == 4) {
-                        e1_params.isdn_port_type[card_id] = value ;
+                        e1_params.isdn_port_type[instance] = value ;
                     } else if (sub_oid == 5) {
-                        e1_params.pll_src[card_id] = value ;
+                        e1_params.pll_src[instance] = value ;
                     } else if (sub_oid == 6) {
-                        e1_params.crc4_enable[card_id] = value ;
-                    } else if (sub_oid == 13) {
-                        update_no1_e1(value);
-                        //e1_params.no1_enable[card_id] = value ;
+                        e1_params.crc4_enable[instance] = value ;
+                    } else if (sub_oid == 13) {                       
+                        e1_params.no1_enable[instance] = value ;
+                        if (instance == card_id) {
+                            update_no1_e1(value);
+                        }
                     } else if (sub_oid == 8) {
-                        e1_params.mtp2_error_check[card_id] = value ;
+                        e1_params.mtp2_error_check[instance] = value ;
                     } else {
                         return SNMP_ERR_NOSUCHINSTANCE;
                     } 
@@ -507,8 +505,6 @@ static err_t snmp_process_get_request(struct snmp_request *request)
     snmp_vb_enumerator_err_t err;
     struct snmp_varbind vb;
     vb.value = request->value_buffer;
-    
-    LWIP_DEBUGF(SNMP_DEBUG, ("SNMP get request\n"));
     
     while (request->error_status == SNMP_ERR_NOERROR) {
         err = snmp_vb_enumerator_get_next(&request->inbound_varbind_enumerator, &vb);
@@ -663,7 +659,7 @@ static void snmp_process_trap_request(struct snmp_request *request)
                 heart_t *heart_msg = (heart_t *)vb.value;
                 if (ip4_addr_cmp(request->source_ip, &omc)) {
                     ram_params.timestamp = PP_HTONL(heart_msg->timestamp);
-                    CARD_DEBUGF(SNMP_DEBUG, ("Got timestamp = 0x%"X32_F"\n", ram_params.timestamp));
+                    LOG_I("Got OMC Server timestamp = %d", ram_params.timestamp);
                 }
             }
         } 
@@ -727,6 +723,7 @@ static void snmp_netconn_thread(void *arg)
   snmp_8ke1_traps_handle = conn;
     
   period_10s_proc(NULL);
+  LOG_I("SNMP thread start!");
     
   do {
     err = netconn_recv(conn, &buf);
@@ -751,6 +748,8 @@ static void trap_var_init(void)
     trap_var.value = (void *)&hb_msg;
 }
 
+#define SNMP_CARD_STACK_SIZE    350*4
+
 void snmp_8ke1_init(void)
 {   
     IP4_ADDR(&sn0, 172, 18, 98, 1);
@@ -763,7 +762,7 @@ void snmp_8ke1_init(void)
 
     trap_var_init();
 
-    sys_thread_new("snmp_netconn", snmp_netconn_thread, NULL, SNMP_STACK_SIZE, osPriorityNormal);
+    sys_thread_new("snmp_netconn", snmp_netconn_thread, NULL, SNMP_CARD_STACK_SIZE, osPriorityNormal);
 }
 
 

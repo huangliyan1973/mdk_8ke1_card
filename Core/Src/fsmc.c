@@ -164,10 +164,10 @@ void MX_FSMC_Init(void)
   hsram4.Init.WriteBurst = FSMC_WRITE_BURST_DISABLE;
   hsram4.Init.PageSize = FSMC_PAGE_SIZE_NONE;
   /* Timing */
-  Timing.AddressSetupTime = 15;
+  Timing.AddressSetupTime = 10;
   Timing.AddressHoldTime = 15;
-  Timing.DataSetupTime = 255;
-  Timing.BusTurnAroundDuration = 15;
+  Timing.DataSetupTime = 20;
+  Timing.BusTurnAroundDuration = 10;
   Timing.CLKDivision = 16;
   Timing.DataLatency = 17;
   Timing.AccessMode = FSMC_ACCESS_MODE_A;

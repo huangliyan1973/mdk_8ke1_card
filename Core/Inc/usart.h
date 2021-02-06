@@ -40,9 +40,7 @@ extern UART_HandleTypeDef huart1;
 void MX_USART1_UART_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-void card_debug_init(void);
-
-void card_printf(const char *fmt, ...);
+int ulog_console_backend_init(void);
 
 /* USER CODE END Prototypes */
 

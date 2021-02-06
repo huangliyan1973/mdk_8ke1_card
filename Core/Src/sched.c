@@ -1,26 +1,34 @@
 #include "main.h"
 #include "sched.h"
-#include "FreeRTOS.h"
-#include "cmsis_os2.h"
-#include "card_debug.h"
+
+#define LOG_TAG              "sch_timer"
+#define LOG_LVL              LOG_LVL_DBG
+#include "ulog.h"
 
 #define SCHED_MAX_TIMEOUT   0x7fffffff
-#define SCHED_STACK_SIZE      128*4
+#define SCHED_STACK_SIZE      256*4
 
 #define TIME_LESS_THAN(t, compare_to)   ( (((u32_t)((t)-(compare_to))) > SCHED_MAX_TIMEOUT) ? 1 : 0)
 
 static struct sched_timeo *next_timeout;
 
-static u32_t current_timeout_due_time;
+//static u32_t current_timeout_due_time;
+
+static sys_mutex_t  time_lock;
+
+#define LOCK_TIME_CORE()      sys_mutex_lock(&time_lock)
+#define UNLOCK_TIME_CORE()    sys_mutex_unlock(&time_lock)
 
 static void sched_timeout_abs(u32_t abs_time, sched_timeout_handler handler, void *arg)
 {
     struct sched_timeo *timeout, *t;
 
+    LOCK_TIME_CORE();
     timeout = (struct sched_timeo *)pvPortMalloc(sizeof(struct sched_timeo));
 
     if (timeout == NULL) {
-        CARD_ASSERT("sched_timeout: timeout != NULL, FreeRtos memory pool is empty", timeout != NULL);
+        printf("sched_timeout: timeout != NULL, FreeRtos memory pool is empty");
+        UNLOCK_TIME_CORE();
         return;
     }
 
@@ -31,6 +39,7 @@ static void sched_timeout_abs(u32_t abs_time, sched_timeout_handler handler, voi
 
     if (next_timeout == NULL) {
         next_timeout = timeout;
+        UNLOCK_TIME_CORE();
         return;
     }
 
@@ -46,6 +55,7 @@ static void sched_timeout_abs(u32_t abs_time, sched_timeout_handler handler, voi
             }
         }
     }
+    UNLOCK_TIME_CORE();
 }
 
 void sched_timeout(u32_t msecs, sched_timeout_handler handler, void *arg)
@@ -61,7 +71,9 @@ void sched_untimeout(sched_timeout_handler handler, void *arg)
 {
     struct sched_timeo *prev_t, *t;
 
+    LOCK_TIME_CORE();
     if (next_timeout == NULL) {
+        UNLOCK_TIME_CORE();
         return;
     }
 
@@ -73,17 +85,22 @@ void sched_untimeout(sched_timeout_handler handler, void *arg)
                 prev_t->next = t->next;
             }
             vPortFree(t);
+            UNLOCK_TIME_CORE();
             return;
         }
     }
+
+    UNLOCK_TIME_CORE();
 }
 
 void sched_check_timeouts(void)
 {
     u32_t now;
 
-    now = HAL_GetTick();
+    LOCK_TIME_CORE();
 
+    now = HAL_GetTick();
+ 
     do {
         struct sched_timeo *tmptimeout;
         sched_timeout_handler handler;
@@ -91,42 +108,29 @@ void sched_check_timeouts(void)
 
         tmptimeout = next_timeout;
         if (tmptimeout == NULL) {
-            return;
+            break;
         }
 
         if (TIME_LESS_THAN(now, tmptimeout->time)) {
-            return;
+            break;
         }
 
         next_timeout = tmptimeout->next;
         handler = tmptimeout->h;
         arg = tmptimeout->arg;
-        current_timeout_due_time = tmptimeout->time;
+        //current_timeout_due_time = tmptimeout->time;
         vPortFree(tmptimeout);
-        
+        tmptimeout = NULL;
+
         if (handler != NULL) {
+            UNLOCK_TIME_CORE();
             handler(arg);
+            LOCK_TIME_CORE();
         }
 
     } while (1);
-}
 
-void sched_restart_timeouts(void)
-{
-    u32_t now;
-    u32_t base;
-    struct sched_timeo *t;
-
-    if (next_timeout == NULL) {
-        return;
-    }
-
-    now = HAL_GetTick();
-    base = next_timeout->time;
-
-    for (t = next_timeout; t != NULL; t = t->next) {
-        t->time = (t->time - base) + now;
-    }
+    UNLOCK_TIME_CORE();
 }
 
 /** Return the time left before the next timeout is due. If no timeouts are
@@ -135,18 +139,21 @@ void sched_restart_timeouts(void)
 u32_t sched_timeouts_sleeptime(void)
 {
     u32_t now;
+    u32_t ret;
 
-    if (next_timeout == NULL) {
-        return TIMEOUT_INFINITE;
-    }
+    LOCK_TIME_CORE();
 
     now = HAL_GetTick();
-    if (TIME_LESS_THAN(next_timeout->time, now)) {
-        return 0;
+    if (next_timeout == NULL) {
+        ret = TIMEOUT_INFINITE;
+    } else if (TIME_LESS_THAN(next_timeout->time, now)) {
+        ret = 0;
     } else {
-        u32_t ret = (u32_t)(next_timeout->time - now);
-        return ret;
+        ret = (u32_t)(next_timeout->time - now);
     }
+
+    UNLOCK_TIME_CORE();
+    return ret;
 }
 #if 0
 static void test_fun(void *arg)
@@ -159,23 +166,22 @@ static void test_fun(void *arg)
 
 static void sched_timeout_thread(void *arg)
 {
-    u32_t sleep_time;
-
     (void)arg;
 
-    CARD_DEBUGF(1, ("sched timeout thread start!\n"));
-    //sched_timeout(100,test_fun,NULL);
+    if (sys_mutex_new(&time_lock) != ERR_OK) {
+        printf("mem allocate for time lock error!\n");
+    }
+
+    LOG_D("sched_timer_start!");
+    TickType_t  xPeriod = pdMS_TO_TICKS(10); //10ms 运行一次
+	TickType_t xLastWakeTime;
+	xLastWakeTime = xTaskGetTickCount();
 
     for(;;) {
-        sleep_time = sched_timeouts_sleeptime();
-        if (sleep_time == TIMEOUT_INFINITE) {
-            //osDelay(100);
-            osThreadYield();
-        } else if (sleep_time > 0) {
-            osDelay(sleep_time);
-        } else {
-            sched_check_timeouts();
-        }
+        vTaskDelayUntil(&xLastWakeTime, xPeriod);
+
+        sched_check_timeouts();
+
     }
 
 }
@@ -183,4 +189,20 @@ static void sched_timeout_thread(void *arg)
 void sched_timeout_init(void)
 {
     sys_thread_new("sched_timout", sched_timeout_thread, NULL, SCHED_STACK_SIZE, osPriorityNormal);
+#if 0
+	if (sys_mutex_new(&time_lock) != ERR_OK) {
+        CARD_ASSERT("mem allocate for time lock error!\n", 0);
+    }
+#endif
+}
+
+void sched_timeout_routine(void)
+{
+	u32_t sleep_time;
+	
+	sleep_time = sched_timeouts_sleeptime();
+	
+	if (sleep_time == 0) {
+		sched_check_timeouts();
+	}
 }

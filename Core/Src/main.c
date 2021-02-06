@@ -27,14 +27,38 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "usart.h"
+#include "ds26518.h"
+#include "zl50020.h"
 #include "sram.h"
-#include "card_debug.h"
-#include "ip4_addr.h"
+#include "eeprom.h"
+#include "sched.h"
+#include "usart.h"
+
+#define LOG_TAG              "main"
+#define LOG_LVL              LOG_LVL_DBG
+#include "ulog.h"
+
+extern u8_t get_card_id(void);
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+uint8_t card_id;
 
+void check_master_clk(void)
+{
+  card_id = get_card_id();
+  /* for test */
+  card_id = 0;
+  if (card_id & 0x0F) {
+    /* slave clk */
+    HAL_GPIO_WritePin(CLOCK_EN_GPIO_Port, CLOCK_EN_Pin, GPIO_PIN_RESET);
+  } else {
+    /* master clk */
+    HAL_GPIO_WritePin(CLOCK_EN_GPIO_Port, CLOCK_EN_Pin, GPIO_PIN_SET);
+  }
+}
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -43,55 +67,19 @@
 
 /* Private macro -------------------------------------------------------------*/
 /* USER CODE BEGIN PM */
-uint8_t card_id;
+
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-extern void init_eeprom(void);
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
-struct test {
-    uint8_t id1;
-    uint32_t id2;
-    uint16_t id3;
-    uint8_t  id_array[1024];
-  };
-
-static void test_sram(void)
-{
-  
-  struct test *test_st = (struct test *)(0x68000000);
-
-  test_st->id1 = 1;
-  test_st->id2 = 2;
-  test_st->id3 = 3;
-  for (int i = 0; i < 1024; i++)
-  {
-    test_st->id_array[i] = i;
-  }
-
-  CARD_DEBUGF(1, ("id1=%"U16_F"id2=%"U16_F"id3=%"U16_F"id4=%"U16_F"\n",
-                test_st->id1,test_st->id2, test_st->id3,test_st->id_array[1023]));
-
-  u16_t  t1 = 0x1234;
-  u8_t  *t8 = (u8_t *)&t1;
-  CARD_DEBUGF(1, ("t8_1 = %x, t8_2 = %x\n", t8[0], t8[1]));
-  
-  ip4_addr_t t_addr;
-  IP4_ADDR(&t_addr, 172, 18, 98, 1);
-  u32_t addr = t_addr.addr;
-  CARD_DEBUGF(1, ("addr = %X\n", addr));
-  
-  t8 = (u8_t *)&addr;
-  CARD_DEBUGF(1, ("t8_1 = %x, t8_2 = %x, t8_3 = %x, t8_4 = %x\n", t8[0], t8[1], t8[2], t8[3]));
-  
-}
 
 /* USER CODE END PFP */
 
@@ -123,7 +111,7 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-	HAL_Delay(1000);
+	//HAL_Delay(1000);
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -132,10 +120,24 @@ int main(void)
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
   HAL_Delay(1000);
-  card_id = 0;
+
+  check_master_clk();
+
+  ulog_console_backend_init();
+
+  printf("\n\n>>>>>>System run at %d frequence!<<<<<<\n", SystemCoreClock);
+
+  led_test();
+
+  ds26518_test();
+
+  HAL_Delay(100);
+
+  zl50020_test();
+
   init_eeprom();
-  test_sram();
-  card_debug_init();
+
+  sram_test();
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -190,11 +192,11 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
-  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV2;
+  RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
+  RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
   {
     Error_Handler();
   }

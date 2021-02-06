@@ -18,12 +18,12 @@ void sched_timeout(u32_t msecs, sched_timeout_handler handler, void *arg);
 
 void sched_untimeout(sched_timeout_handler handler, void *arg);
 
-void sched_restart_timeouts(void);
-
 void sched_check_timeouts(void);
 
 u32_t sched_timeouts_sleeptime(void);
 
 void sched_timeout_init(void);
+
+void sched_timeout_routine(void);
 
 #endif /* SCHED_TIMEOUTS_H */
