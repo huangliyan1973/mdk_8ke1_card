@@ -48,11 +48,13 @@
 /* USER CODE BEGIN PD */
 void print_task(void)
 {
-    char buf[256] = {0};
+    char buf[512] = {0};
+    
+    LOG_I("freeHeapsize = %d, miniHeapsize=%d",xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
 
     vTaskList(buf);
     printf("Name\t\tState\tPri\tStack\tNum\n");
-    printf("%s",buf);
+    printf("\n%s\n",buf);
 }
 
 /* USER CODE END PD */
@@ -137,7 +139,7 @@ void StartDefaultTask(void *argument)
   MX_LWIP_Init();
   /* USER CODE BEGIN StartDefaultTask */
   snmp_8ke1_init();
-  //server_interface_init();
+  server_interface_init();
   //shell_init();
   sched_timeout_init();
 

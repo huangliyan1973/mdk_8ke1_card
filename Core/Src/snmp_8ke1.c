@@ -30,10 +30,19 @@ static const u8_t   e1_oid_len = (u8_t)LWIP_ARRAYSIZE(e1_oid_base);
 static const struct snmp_obj_id  snmp_8ke1_enterprise_oid_default = {SNMP_8KE1_ENTERPRISE_OID_LEN, SNMP_8KE1_ENTERPRISE_OID};
 static const struct snmp_obj_id *snmp_8ke1_enterprise_oid         = &snmp_8ke1_enterprise_oid_default;
 
+
+#define SNMP_8KE1_MTP2_OID_LEN    14
+#define SNMP_8KE1_MTP2_OID    {1, 3, 6, 1, 4, 1, 1373, 1, 3, 1, 1, 3, 4, 0}
+
+static const struct snmp_obj_id  snmp_8ke1_mtp2_oid_default = {SNMP_8KE1_MTP2_OID_LEN, SNMP_8KE1_MTP2_OID};
+static const struct snmp_obj_id *snmp_8ke1_mtp2_oid         = &snmp_8ke1_mtp2_oid_default;
+
+
 static const char *snmp_community = "public";
 
 extern card_heart_t  hb_msg;
 static struct snmp_varbind  trap_var;
+static struct snmp_varbind  mtp2_trap_var;
 
 struct snmp_msg_trap { 
   /* source IP address, raw network order format */
@@ -740,12 +749,26 @@ static void snmp_netconn_thread(void *arg)
 
 static void trap_var_init(void)
 {
+    hb_msg_init();
+
     memset(&trap_var, 0, sizeof(struct snmp_varbind));
 
     trap_var.type = SNMP_ASN1_TYPE_OCTET_STRING;
     snmp_oid_assign(&trap_var.oid, snmp_8ke1_enterprise_oid->id, snmp_8ke1_enterprise_oid->len);
     trap_var.value_len = sizeof(card_heart_t);
     trap_var.value = (void *)&hb_msg;
+}
+
+
+static void mtp2_trap_var_init(void)
+{
+    mtp2_heart_msg_init();
+    memset(&mtp2_trap_var, 0, sizeof(struct snmp_varbind));
+
+    mtp2_trap_var.type = SNMP_ASN1_TYPE_OCTET_STRING;
+    snmp_oid_assign(&trap_var.oid, snmp_8ke1_mtp2_oid->id, snmp_8ke1_mtp2_oid->len);
+    mtp2_trap_var.value_len = sizeof(mtp2_heart_t);
+    mtp2_trap_var.value = (void *)&mtp2_heart_msg;
 }
 
 #define SNMP_CARD_STACK_SIZE    350*4
@@ -761,6 +784,7 @@ void snmp_8ke1_init(void)
     ip4_addr_copy(trap_dst[2].dip, omc);
 
     trap_var_init();
+    mtp2_trap_var_init();
 
     sys_thread_new("snmp_netconn", snmp_netconn_thread, NULL, SNMP_CARD_STACK_SIZE, osPriorityNormal);
 }
@@ -806,6 +830,7 @@ err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
 
                     /** send to the TRAP destination */
                     snmp_sendto(snmp_8ke1_traps_handle, p, &td->dip, SNMP_UDP_PORT);
+                    
                     pbuf_free(p);
                 } else {
                     err = ERR_MEM;
@@ -831,6 +856,21 @@ void send_trap_msg(u8_t dst_flag)
     }
     snmp_send_8ke1_trap(&trap_var);
 }
+
+void send_mtp2_trap_msg(void)
+{
+    if (plat_no == 0) {
+        trap_dst[0].enable = 1;
+        trap_dst[1].enable = 0;
+    } else {
+        trap_dst[0].enable = 0;
+        trap_dst[1].enable = 1;
+    }
+    trap_dst[2].enable = 1;
+
+    snmp_send_8ke1_trap(&mtp2_trap_var);
+}
+
 
 static u16_t
 snmp_trap_varbind_sum(struct snmp_msg_trap *trap, struct snmp_varbind *varbinds)

@@ -195,15 +195,15 @@ enum q921_tei_check_state {
 //#define MTP_MAX_PCK_SIZE 270
 //#define U_S_PCK_SIZE	128
 
-#define MTP_MAX_PCK_SIZE 64
-#define U_S_PCK_SIZE	32
+#define MTP_MAX_PCK_SIZE 256
+#define U_S_PCK_SIZE	64
 #define U_S_PCK_BUFF_SIZE  8
 
 typedef struct mtp2_state{
 	enum {
 		/* Link is stopped by management command, will not go up until
 		   started explicitly. */
-		MTP2_DOWN,
+		MTP2_DOWN = 0,
 		/* Initial alignment has started, link is transmitting 'O', but no 'O',
 		   'N', or 'E' has been received. */
 		MTP2_NOT_ALIGNED,

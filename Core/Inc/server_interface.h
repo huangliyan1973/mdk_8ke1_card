@@ -170,6 +170,27 @@ typedef struct {
 	u8_t				hb_fdl[16];					// 42
 }__attribute__ ((packed)) card_heart_t;
 
+typedef struct {
+	u8_t    sys_id;					//0
+	u8_t    subsys_id;				//1
+	u32_t   timestamp;				//2
+	u8_t    led_ctl_code[8];		//6
+	u8_t    alarm_component;		//14
+	u8_t    alarm_code;				//15
+	u8_t    reserved;				//16
+	u8_t    l1_status;				//17
+	u8_t    l2_status[8];			//18
+	u8_t 	dst_ip[8];				//26
+	u8_t 	retrieved_bsnt[8];		//34
+	u8_t 	mtp2_soft_version;		//42
+	u8_t 	e1_port_type;			//43
+	u8_t 	is_NT;					//44
+	u8_t 	sysnc_clock[16];		//45
+	u8_t    mtp2_mode;				//61
+} __attribute__((packed)) mtp2_heart_t;
+
+extern mtp2_heart_t mtp2_heart_msg;
+
 /* STM32F407 PB7 pin control the master clock input */
 #define MASTER_CLK		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET)
 #define SLAVE_CLK		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET)
@@ -197,5 +218,14 @@ extern void period_10s_proc(void *arg);
 extern void start_period_proc(void);
 
 extern void snmp_8ke1_init(void);
+
+extern void hb_msg_init(void);
+extern void mtp2_heart_msg_init(void);
+
+extern void link_in_service(int e1_no);
+
+extern void link_outof_service(int e1_no, u8_t alarm_code);
+
+extern void send_mtp2_trap_msg(void);
 
 #endif /* INC_CSU_IF_H_ */

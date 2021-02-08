@@ -15,6 +15,8 @@
 #include "ds26518.h"
 #include "zl50020.h"
 #include "sched.h"
+#include "mtp2_def.h"
+#include "ip4_addr.h"
 
 #define LOG_TAG              "server"
 #define LOG_LVL              LOG_LVL_DBG
@@ -27,18 +29,17 @@ static struct netconn *isdn_conn;
 extern u8_t card_id;
 
 card_heart_t  hb_msg;
+mtp2_heart_t mtp2_heart_msg;
 
 void send_ss7_test_msg(void);
 void send_isdn_test_msg(void);
-
-void hb_msg_init(void);
 
 static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *src_addr)
 {
     
 }
 
-
+#if 0
 static void isdn_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *src_addr, u16_t port)
 {
     LWIP_UNUSED_ARG(conn);
@@ -84,16 +85,17 @@ static void isdn_netconn_thread(void *arg)
         }
     } while (1);
 }
+#endif
 
 static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *src_addr, u16_t port)
 {
     struct ss7_head *rev_msg = (struct ss7_head *)p->payload;
 
-    u8_t sio = rev_msg->sio;
-    u8_t e1_no = rev_msg->e1_no;
+    //u8_t sio = rev_msg->sio;
+    //u8_t e1_no = rev_msg->e1_no;
 
-	LOG_I("rev 4950 msg: e1=%d, sio=%x", e1_no, sio);
-    LOG_HEX("4950msg", 16, (u8_t *)rev_msg, rev_msg->len+1);
+	LOG_I("server msg: srcip: %s, len: %d", ip4addr_ntoa((const ip4_addr_t *)src_addr), p->tot_len);
+    //LOG_HEX("server", 16, (u8_t *)p, p->tot_len);
 }
 
 static void ss7_netconn_thread(void *arg)
@@ -110,8 +112,6 @@ static void ss7_netconn_thread(void *arg)
 	
   printf("SS7 thread Start!\n");
 
-  //for test
-  //send_ss7_test_msg();
   do {
     err = netconn_recv(conn, &buf);
 
@@ -125,11 +125,11 @@ static void ss7_netconn_thread(void *arg)
   } while (1);
 }
 
-#define SS7_STACK_SIZE      128*4
+#define SS7_STACK_SIZE      256*4
 
 void server_interface_init(void)
 {   
-    hb_msg_init();
+    //hb_msg_init();
     //period_10s_proc(NULL);
     sys_thread_new("ss7_netconn", ss7_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
     //sys_thread_new("isdn_netconn", isdn_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
@@ -216,6 +216,47 @@ void send_card_heartbeat(u8_t dst_flag)
     send_trap_msg(dst_flag);
 }
 
+void mtp2_heart_msg_init(void)
+{
+    mtp2_heart_msg.sys_id = plat_no;
+    mtp2_heart_msg.subsys_id = card_id & 0x0F;
+    //u8_t dst_ip = (plat_no == 0 ? 98 : 99);
+    memset(mtp2_heart_msg.dst_ip, 0xff, 8);
+    mtp2_heart_msg.mtp2_soft_version = 0x50;
+}
+
+void link_in_service(int e1_no)
+{
+    mtp2_heart_msg.timestamp = ram_params.timestamp;
+    mtp2_heart_msg.led_ctl_code[e1_no & 7] = LED_IN_SERVICE;
+    mtp2_heart_msg.alarm_component = e1_no & 7;
+
+    u8_t dst_ip = (plat_no == 0 ? 98 : 99);
+    memset(mtp2_heart_msg.dst_ip, dst_ip, 8);
+
+    mtp2_heart_msg.alarm_code = ALARM_IN_SERVICE;
+    mtp2_heart_msg.l1_status = ram_params.e1_l1_alarm;
+    mtp2_heart_msg.l2_status[e1_no & 7] = ram_params.e1_l2_alarm;
+    mtp2_heart_msg.e1_port_type = e1_params.e1_port_type[card_id & 0x0f];
+    mtp2_heart_msg.is_NT = e1_params.isdn_port_type[card_id & 0x0f];
+    mtp2_heart_msg.mtp2_mode = e1_params.mtp2_error_check[card_id & 0x0f];
+
+    send_mtp2_trap_msg();    
+}
+
+void link_outof_service(int e1_no, u8_t alarm_code)
+{
+    mtp2_heart_msg.timestamp = ram_params.timestamp;
+    mtp2_heart_msg.led_ctl_code[e1_no & 7] = LED_ALIGNMENT;
+    mtp2_heart_msg.alarm_component = e1_no & 7;
+
+    mtp2_heart_msg.l1_status = ram_params.e1_l1_alarm;
+    mtp2_heart_msg.l2_status[e1_no & 7] = (ram_params.e1_l2_alarm >> e1_no) & 1;
+    //mtp2_heart_msg.retrieved_bsnt =  0;
+
+    send_mtp2_trap_msg();
+}
+
 /* 20ms period */
 void ls_scan(int e1_no)
 {
@@ -265,7 +306,7 @@ void period_10s_proc(void *arg)
     static u8_t pingpang = TO_OMC;
 
     (void)arg;
-
+#if 0
     if (pingpang == TO_OMC) {
         send_card_heartbeat(pingpang);
         pingpang = plat_no;
@@ -273,7 +314,8 @@ void period_10s_proc(void *arg)
         send_card_heartbeat(pingpang);
         pingpang = TO_OMC;
     }
-
+#endif
+    send_mtp2_trap_msg();
     LOG_I("perioad 10s timeout");
 
     //print_task();

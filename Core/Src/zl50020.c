@@ -185,10 +185,13 @@ void m34116_conf_connect(u8_t p, u8_t gaini, u8_t ai, u8_t gaino, u8_t ao, u8_t 
 u8_t m34116_status(u8_t slot)
 {
     u8_t *reg = (u8_t *)CONF_ADDR;
+    
+    LOG_I("conf data = %x", *reg);
 
     *reg = slot & 0x1F;
     *(reg + 1) = 0x6;
 
+    LOG_I("after set, conf data = %x, data1=%x", *reg, *(reg+1));
     return (*reg);
 }
 

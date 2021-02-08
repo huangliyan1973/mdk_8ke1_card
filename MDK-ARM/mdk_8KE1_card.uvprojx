@@ -339,7 +339,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx,CARD_DEBUG</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;                ../LWIP/App;                ../LWIP/Target;                ../Middlewares/Third_Party/LwIP/src/include;                ../Middlewares/Third_Party/LwIP/system;                ../Drivers/STM32F4xx_HAL_Driver/Inc;                ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;                ../Middlewares/Third_Party/FreeRTOS/Source/include;                ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2;                ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;                ../Middlewares/Third_Party/LwIP/src/include/netif/ppp;                ../Drivers/CMSIS/Device/ST/STM32F4xx/Include;                ../Middlewares/Third_Party/LwIP/src/include/lwip;                ../Middlewares/Third_Party/LwIP/src/include/lwip/apps;                ../Middlewares/Third_Party/LwIP/src/include/lwip/priv;                ../Middlewares/Third_Party/LwIP/src/include/lwip/prot;                ../Middlewares/Third_Party/LwIP/src/include/netif;                ../Middlewares/Third_Party/LwIP/src/include/compat/posix;                ../Middlewares/Third_Party/LwIP/src/include/compat/posix/arpa;                ../Middlewares/Third_Party/LwIP/src/include/compat/posix/net;                ../Middlewares/Third_Party/LwIP/src/include/compat/posix/sys;                ../Middlewares/Third_Party/LwIP/src/include/compat/stdc;                ../Middlewares/Third_Party/LwIP/system/arch;                ../Middlewares/Third_Party/LwIP/src/apps/snmp;                ../Drivers/CMSIS/Include</IncludePath>
+              <IncludePath>../Core/Inc;                     ../LWIP/App;                     ../LWIP/Target;                     ../Middlewares/Third_Party/LwIP/src/include;                     ../Middlewares/Third_Party/LwIP/system;                     ../Drivers/STM32F4xx_HAL_Driver/Inc;                     ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;                     ../Middlewares/Third_Party/FreeRTOS/Source/include;                     ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2;                     ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F;                     ../Middlewares/Third_Party/LwIP/src/include/netif/ppp;                     ../Drivers/CMSIS/Device/ST/STM32F4xx/Include;                     ../Middlewares/Third_Party/LwIP/src/include/lwip;                     ../Middlewares/Third_Party/LwIP/src/include/lwip/apps;                     ../Middlewares/Third_Party/LwIP/src/include/lwip/priv;                     ../Middlewares/Third_Party/LwIP/src/include/lwip/prot;                     ../Middlewares/Third_Party/LwIP/src/include/netif;                     ../Middlewares/Third_Party/LwIP/src/include/compat/posix;                     ../Middlewares/Third_Party/LwIP/src/include/compat/posix/arpa;                     ../Middlewares/Third_Party/LwIP/src/include/compat/posix/net;                     ../Middlewares/Third_Party/LwIP/src/include/compat/posix/sys;                     ../Middlewares/Third_Party/LwIP/src/include/compat/stdc;                     ../Middlewares/Third_Party/LwIP/system/arch;                     ../Middlewares/Third_Party/LwIP/src/apps/snmp;                     ../Drivers/CMSIS/Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -444,6 +444,11 @@
               <FilePath>..\Core\Src\sram.c</FilePath>
             </File>
             <File>
+              <FileName>ulog.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\ulog.c</FilePath>
+            </File>
+            <File>
               <FileName>main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/main.c</FilePath>
@@ -482,11 +487,6 @@
               <FileName>stm32f4xx_hal_timebase_tim.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f4xx_hal_timebase_tim.c</FilePath>
-            </File>
-            <File>
-              <FileName>ulog.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\Src\ulog.c</FilePath>
             </File>
           </Files>
         </Group>

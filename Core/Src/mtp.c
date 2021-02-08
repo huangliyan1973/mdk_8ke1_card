@@ -26,10 +26,12 @@
 
 #define MTP2_POLL_ENABLE    
 
+#define MTP2_LSSU_DEBUG
+
 extern uint8_t card_id;
 
-//static mtp2_t mtp2_state[E1_LINKS_MAX] __attribute__((at(SRAM_BASE_ADDR)));
-static mtp2_t mtp2_state[1];
+static mtp2_t mtp2_state[E1_LINKS_MAX] __attribute__((at(SRAM_BASE_ADDR)));
+//static mtp2_t mtp2_state[1];
 
 #if 0
 static sys_mbox_t mtp_mbox;
@@ -242,7 +244,9 @@ mtp2_pick_frame(mtp2_t *m)
         m->tx_buffer[1] = m->retrans_last_sent | (m->send_fib << 7);
         m->tx_buffer[2] = 1;      /* Length 1, meaning LSSU. */
         m->tx_buffer[3] = 3;      /* 3 is indication 'SIOS'. */
+#ifdef MTP2_LSSU_DEBUG
         LOG_D("<--SIOS");
+#endif
         return;
 
     case MTP2_NOT_ALIGNED:
@@ -252,7 +256,9 @@ mtp2_pick_frame(mtp2_t *m)
         m->tx_buffer[1] = m->retrans_last_sent | (m->send_fib << 7);
         m->tx_buffer[2] = 1;      /* Length 1, meaning LSSU. */
         m->tx_buffer[3] = 0;      /* 0 is indication 'SIO'. */
+#ifdef MTP2_LSSU_DEBUG
         LOG_D("<--SIO");
+#endif
         return;
 
     case MTP2_ALIGNED:
@@ -264,7 +270,9 @@ mtp2_pick_frame(mtp2_t *m)
         m->tx_buffer[2] = 1;      /* Length 1, meaning LSSU. */
         m->tx_buffer[3] = 1;
         sin_scount++;
+#ifdef MTP2_LSSU_DEBUG
         LOG_D("<--SIN");
+#endif
         return;
 
     case MTP2_READY:
@@ -374,7 +382,9 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
             mtp3_link_fail(m, 0);
         
         }
+#ifdef MTP2_LSSU_DEBUG
         LOG_I("-->SIO");
+#endif
         break;
 
     case 1:                   /* Status indication 'N' */
@@ -404,7 +414,9 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
             LOG_W("Got status indication 'N' or 'E' while INSERVICE on link '%d'.", m->e1_no);
             mtp3_link_fail(m, 0);
         }
+#ifdef MTP2_LSSU_DEBUG
         LOG_I("-->SIN");
+#endif
         break;
 
     case 3:                   /* Status indication 'OS' */
@@ -423,7 +435,9 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
             mtp3_link_fail(m, 1);
         
         }
+#ifdef MTP2_LSSU_DEBUG
         LOG_I("-->SIOS");
+#endif
         break;
 
     case 4:                   /* Status indication 'PO' */
@@ -680,6 +694,8 @@ void e1_port_init(int e1_no)
         return;
     }
 
+    LOG_W("link '%d' enable = %d", e1_no, E1_PORT_ENABLE(e1_no));
+
     if (!E1_PORT_ENABLE(e1_no))
         return;
 
@@ -688,21 +704,24 @@ void e1_port_init(int e1_no)
         prepare_init_link(e1_no);
         if (SS7_PORT_ENABLE(e1_no)) { /* ss7 */
             m->protocal = SS7_PROTO_TYPE;
-            LOG_D("link '%d' start ss7 init", e1_no);
+            LOG_W("link '%d' start ss7 init", e1_no);
             ds26518_port_init(e1_no, CCS_TYPE);
             start_initial_alignment(m, "Initial");
         } else {  /* ISDN PRI */
             m->protocal = PRI_PROTO_TYPE;
             m->pri_mode = PRI_NETWORK_ENABLE(e1_no) ? PRI_NETWORK : PRI_CPE;
-            LOG_D("link '%d' start isdn init", e1_no);
+            LOG_W("link '%d' start isdn init", e1_no);
             ds26518_port_init(e1_no, CCS_TYPE);
             q921_start(m);
         }
     } else { /* china no.1 */
-        LOG_D("link '%d' start china-no1 init", e1_no);
+        LOG_W("link '%d' start china-no1 init", e1_no);
         ds26518_port_init(e1_no, CAS_TYPE);
         m->protocal = NO1_PROTO_TYPE;
     }
+    
+    LOG_D("link '%d' protocal = %d, pri_mode = %d", e1_no, m->protocal, m->pri_mode);
+    
 }
 
 mtp2_t *get_mtp2_state(u8_t link_no)
@@ -764,24 +783,25 @@ static void mtp2_thread(void *arg)
 
     for (;;) {
        vTaskDelayUntil(&xLastWakeTime, xPeriod);
-#if 0
+
        for(int i = 0; i < E1_LINKS_MAX; i++) {
            m = &mtp2_state[i];
-#endif 
-           m = &mtp2_state[0];
-#if 0
+
            if ((m == NULL) || (m->protocal == NO1_PROTO_TYPE) ||
                 (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_DOWN) ||
                 (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_TEI_UNASSIGNED)) {
                     continue;
                 }
-#endif
-            ds26518_tx_rx_poll(0);
+
+            //if (m->protocal == SS7_PROTO_TYPE && m->state > MTP2_DOWN)
+            //{
+            //ds26518_tx_rx_poll(0);
 			//sched_timeout_routine();
-#if 0
+            //printf("link '%d' poll tx and rx\n", i);
             ds26518_tx_rx_poll(i);
+            //}
        }
-#endif
+
     }
 }
 
@@ -800,12 +820,14 @@ void mtp_init(void)
 #endif
 
     ds26518_global_init();
-#if 0
+    
+    memset((void*)&mtp2_state[0], 0, sizeof(mtp2_t)*E1_LINKS_MAX);
+
     for(int index = 0; index < E1_LINKS_MAX; index++) {
         e1_port_init(index);
     }
-#endif
-    e1_port_init(0);
+
+    //e1_port_init(0);
 
 #ifndef MTP2_POLL_ENABLE
     mtp_semaphore = osSemaphoreNew(1, 1, NULL);
@@ -873,13 +895,6 @@ void rv_ccs_byte(u8_t e1_no, u8_t data)
 {
     mtp2_t *m = &mtp2_state[e1_no];
 
-#if 0
-    if (m->protocal == NO1_PROTO_TYPE ||
-        (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_DOWN) ||
-        (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_TEI_UNASSIGNED)) {
-        return;
-    }
-#endif
     m->rx_buf[m->rx_len++] = data;
 }
 
@@ -919,7 +934,7 @@ u8_t read_l2_status(int e1_no)
         return 1;
     }
 
-    if (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_INSERVICE) {
+    if (m->protocal == SS7_PROTO_TYPE && (m->state == MTP2_INSERVICE || m->state == MTP2_READY)) {
         return 1;
     }
 

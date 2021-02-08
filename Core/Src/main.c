@@ -49,6 +49,7 @@ uint8_t card_id;
 void check_master_clk(void)
 {
   card_id = get_card_id();
+  printf("\n\nGot Card id = %X\n", card_id);
   /* for test */
   card_id = 0;
   if (card_id & 0x0F) {
@@ -138,6 +139,8 @@ int main(void)
   init_eeprom();
 
   sram_test();
+
+  conf_module_detect();
   /* USER CODE END 2 */
 
   /* Init scheduler */

@@ -114,6 +114,7 @@ void _sys_exit(int x)
 	x = x;
 }
 
+
 #ifdef __GNUC__
 /* With GCC/RAISONANCE, small printf (option LD Linker->Libraries->Small printf
 set to 'Yes') calls __io_putchar() */

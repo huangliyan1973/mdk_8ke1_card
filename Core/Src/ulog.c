@@ -27,7 +27,7 @@
 #define ULOG_COLOR_DEBUG NULL
 #endif
 #ifndef ULOG_COLOR_INFO
-#define ULOG_COLOR_INFO (F_GREEN)
+#define ULOG_COLOR_INFO (F_BLUE)
 #endif
 #ifndef ULOG_COLOR_WARN
 #define ULOG_COLOR_WARN (F_YELLOW)
