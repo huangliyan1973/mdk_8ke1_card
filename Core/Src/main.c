@@ -140,7 +140,7 @@ int main(void)
 
   sram_test();
 
-  conf_module_detect();
+  module_test();
   /* USER CODE END 2 */
 
   /* Init scheduler */

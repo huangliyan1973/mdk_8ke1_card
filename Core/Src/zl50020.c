@@ -234,11 +234,21 @@ u8_t get_card_id(void)
 
 void set_card_e1_led(void)
 {
+    static u8_t l1_alarm, l2_alarm;
     u8_t *led_red = (u8_t *)E1_RED_LED_ADDR;
     u8_t *led_green = (u8_t *)E1_GREEN_LED_ADDR;
 
-    *led_green = (!ram_params.e1_l1_alarm & e1_params.e1_enable[card_id & 0xF]) & e1_params.e1_l2_alarm_enable[card_id & 0xF];
-    *led_red = (ram_params.e1_l1_alarm | !ram_params.e1_l2_alarm) & e1_params.e1_enable[card_id & 0xF];
+    *led_green = (~(ram_params.e1_l1_alarm) & e1_params.e1_enable[card_id & 0xF]) & e1_params.e1_l2_alarm_enable[card_id & 0xF];
+    *led_red = (ram_params.e1_l1_alarm | ~(ram_params.e1_l2_alarm)) & e1_params.e1_enable[card_id & 0xF];
+
+    if (l1_alarm != ram_params.e1_l1_alarm || l2_alarm != ram_params.e1_l2_alarm) {
+        l2_alarm = ram_params.e1_l2_alarm;
+        l1_alarm = ram_params.e1_l1_alarm;
+        LOG_W("update led: l1_alarm = %x", l1_alarm);
+        LOG_W("update led: l2_alarm = %x", l2_alarm);
+        LOG_W("update led: e1_enable = %x, l2_alarm_enable=%x", 
+            e1_params.e1_enable[card_id & 0xF], e1_params.e1_l2_alarm_enable[card_id & 0xF]);
+    }
 }
 
 void test_e1_led(u8_t red, u8_t green)

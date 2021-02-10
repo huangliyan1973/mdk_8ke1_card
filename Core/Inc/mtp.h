@@ -203,7 +203,7 @@ typedef struct mtp2_state{
 	enum {
 		/* Link is stopped by management command, will not go up until
 		   started explicitly. */
-		MTP2_DOWN = 0,
+		MTP2_DOWN,
 		/* Initial alignment has started, link is transmitting 'O', but no 'O',
 		   'N', or 'E' has been received. */
 		MTP2_NOT_ALIGNED,

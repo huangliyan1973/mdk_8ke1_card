@@ -10,6 +10,7 @@
 #include "eeprom.h"
 #include "server_interface.h"
 #include "sched.h"
+#include "mtp2_def.h"
 
 #define LOG_TAG              "mtp2"
 #define LOG_LVL              LOG_LVL_DBG
@@ -26,7 +27,7 @@
 
 #define MTP2_POLL_ENABLE    
 
-#define MTP2_LSSU_DEBUG
+//#define MTP2_LSSU_DEBUG
 
 extern uint8_t card_id;
 
@@ -81,6 +82,7 @@ static void mtp2_t3_timeout(void *arg)
     abort_initial_alignment(m);
 }
 
+#if 0
 static unsigned char sltm_pattern[15] = {
     0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
     0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff
@@ -103,13 +105,14 @@ static void mtp2_send_sltm(mtp2_t *m)
     memcpy(&(message_sltm[6]), sltm_pattern, sizeof(sltm_pattern));
     mtp2_queue_msu(m->e1_no, 0x81, message_sltm, 6 + sizeof(sltm_pattern));
 }
+#endif
 
 static void test_5s_timeout(void *arg)
 {
-    mtp2_t *m = (mtp2_t *)arg;
-    LOG_I("send sltm message for test!, S_SIN=%d, R_SIN=%d, S_FISU=%d, R_FISU=%d",
+    //mtp2_t *m = (mtp2_t *)arg;
+    LOG_I("send SINs=%d, received SINs=%d, send FISUs=%d, reivced FISUs=%d",
         sin_scount, sin_rcount, fisu_scount, fisu_rcount);
-    mtp2_send_sltm(m);
+    //mtp2_send_sltm(m);
 
     //sched_timeout(50000, test_5s_timeout, m);
 }
@@ -124,6 +127,9 @@ static void mtp2_t4_timeout(void *arg)
     m->state = MTP2_READY;
     sched_timeout(T1_TIMEOUT, mtp2_t1_timeout, m);
 
+    //ram_params.e1_l2_alarm |= (1 << m->e1_no);
+    //link_in_service(m->e1_no);
+
     sched_timeout(50000, test_5s_timeout, m);
 }
 
@@ -132,6 +138,9 @@ static void mtp2_t7_timeout(void *arg)
 {
     mtp2_t *m = (mtp2_t *)arg;
     LOG_W("T7 timeout (excessive delay of acknowledgement) on link '%d', state = %d", m->e1_no, m->state);
+
+    ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
+    link_outof_service(m->e1_no, LKALARM_EXECACK);
 
     mtp3_link_fail(m, 1);
 }
@@ -224,6 +233,21 @@ static void start_initial_alignment(mtp2_t *m, char* reason)
     sched_timeout(T2_TIMEOUT, mtp2_t2_timeout, m);
 }
 
+static char *rev_mtp3_msg_name(u8_t sio)
+{
+    if (sio == 1 || sio == 0) {
+        return "SN:==>SNM";
+    } else if (sio == 3) {
+       return "SN:==>SCCP";
+    } else if (sio == 4) {
+        return "SN:==>TUP";
+    } else if (sio == 5) {
+        return "SN:==>ISUP";
+    }
+
+    return "SN:==>UNKOWN";
+}
+
 /* Find a frame to transmit and put it in the transmit buffer.
 
    Q.703 (11.2.2): Pick a frame in descending priority as
@@ -268,10 +292,10 @@ mtp2_pick_frame(mtp2_t *m)
         m->tx_buffer[0] = m->send_bsn | (m->send_bib << 7);
         m->tx_buffer[1] = m->retrans_last_sent | (m->send_fib << 7);
         m->tx_buffer[2] = 1;      /* Length 1, meaning LSSU. */
-        m->tx_buffer[3] = 1;
+        m->tx_buffer[3] = 2;
         sin_scount++;
 #ifdef MTP2_LSSU_DEBUG
-        LOG_D("<--SIN");
+        LOG_D("<--SIE");
 #endif
         return;
 
@@ -298,6 +322,9 @@ mtp2_pick_frame(mtp2_t *m)
                 /* Move to the next one. */
                 m->retrans_seq = MTP_NEXT_SEQ(m->retrans_seq);
             }
+
+            /* for debug */
+            LOG_HEX(rev_mtp3_msg_name(m->tx_buffer[3] & 0xf), 16, m->tx_buffer, m->tx_len);
 
             return;
         }
@@ -327,7 +354,10 @@ void mtp2_queue_msu(u8_t e1_no, u8_t sio, u8_t *sif, int len)
 		{
 			LOG_E("ERROR ! Got MSU (sio=%x), but link not in service, discarding on link '%d'.", sio, m->e1_no);
 			return;
-		}
+		} else {
+            //m->state = MTP2_INSERVICE;
+            //LOG_D("Got MSU (sio=%x), but link not in service, set it to INSERVICE on link '%d'.", sio, m->e1_no);
+        }
 	}
 
 	if (len < 2)
@@ -349,6 +379,7 @@ void mtp2_queue_msu(u8_t e1_no, u8_t sio, u8_t *sif, int len)
 	memcpy(&(m->retrans_buf[i].buf[4]), sif, len);
 	m->retrans_buf[i].len = len + 4;
 	m->retrans_last_sent = i;
+
 	/* Start transmitting the new SU, unless we were already (re-)transmitting. */
 	if(m->retrans_seq == -1) {
 		m->retrans_seq = i;
@@ -372,6 +403,10 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
             m->state = MTP2_ALIGNED;
             LOG_I("Got status indication 'O' while NOT_ALIGNED on link %d. ", m->e1_no);
         
+        } else if (m->state == MTP2_PROVING) {
+            sched_untimeout(mtp2_t4_timeout, m);
+            m->state = MTP2_ALIGNED;
+        
         } else if (m->state == MTP2_READY) {
             
             abort_initial_alignment(m);
@@ -379,6 +414,10 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
         } else if (m->state == MTP2_INSERVICE) {
             
             LOG_W("Got status indication 'O' while INSERVICE on link %d.", m->e1_no);
+            
+            ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
+            link_outof_service(m->e1_no, LKALARM_RV_LSSU);
+
             mtp3_link_fail(m, 0);
         
         }
@@ -410,8 +449,10 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
             m->state = MTP2_PROVING;
         
         } else if (m->state == MTP2_INSERVICE) {
-
             LOG_W("Got status indication 'N' or 'E' while INSERVICE on link '%d'.", m->e1_no);
+            ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
+            set_card_e1_led();
+            link_outof_service(m->e1_no, LKALARM_WORKING);
             mtp3_link_fail(m, 0);
         }
 #ifdef MTP2_LSSU_DEBUG
@@ -421,17 +462,23 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
 
     case 3:                   /* Status indication 'OS' */
         if (m->state == MTP2_ALIGNED || m->state == MTP2_PROVING) {
-        
+            //ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
+            //link_outof_service(m->e1_no, LKALARM_POC);
             abort_initial_alignment(m);
         
         } else if (m->state == MTP2_READY) {
             
             LOG_W("Got status indication 'OS' while READY on link '%d'.", m->e1_no);
+            //ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
+            //link_outof_service(m->e1_no, LKALARM_WORKING);
             mtp3_link_fail(m, 1);
         
         } else if(m->state == MTP2_INSERVICE) {
             
             LOG_W("Got status indication 'OS' while INSERVICE on link '%d'.", m->e1_no);
+            ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
+            set_card_e1_led();
+            link_outof_service(m->e1_no, LKALARM_WORKING);
             mtp3_link_fail(m, 1);
         
         }
@@ -454,11 +501,12 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
 
     default:                  /* Illegal status indication. */
         LOG_E("Got undefined LSSU status %d on link '%d'.", typ, m->e1_no);
+        //ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
+        //link_outof_service(m->e1_no, LKALARM_WORKING2);
         mtp3_link_fail(m, 0);
     }
 }
 
-//#define MTP2_BUF_DEBUG
 /* Process a received frame.
 
    The frame has already been checked for correct crc and for being at least
@@ -479,33 +527,13 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
     fib = buf[1] >> 7;
 
     li = buf[2] & 0x3f;
-/***
-    if (option_debug > 2) {
-        if (m->hwmtp2 || m->hwhdlcfcs || (li > 2)) {
-            char pbuf[1000], hex[30];
-            int i;
-            int slc;
-
-            if(variant(m) == ITU_SS7)
-                slc = (buf[7] & 0xf0) >> 4;
-            else if(variant(m) == CHINA_SS7)
-                slc = (buf[10] & 0xf0) >> 4;
-            else
-                slc = (buf[10] & 0xf0) >> 4;
-
-            strcpy(pbuf, "");
-            for(i = 0; i < li - 1 && i + 4 < len; i++) {
-                sprintf(hex, " %02x", buf[i + 4]);
-                strcat(pbuf, hex);
-            }
-            vLog(MONITOR_DEBUG, "Got MSU on link '%s/%d' sio=%d slc=%d m.sls=%d bsn=%d/%d, fsn=%d/%d, sio=%02x, len=%d:%s\r\n", m->e1_no, m->schannel+1, buf[3] & 0xf, slc, m->sls, bib, bsn, fib, fsn, buf[3], li, pbuf);
-        }
-    }
-***/
 
     if (li + 3 > len) {
         LOG_W("Got unreasonable length indicator %d (len=%d) on link '%d'.",
                  li, len, m->e1_no);
+        LOG_HEX("Error", 16, buf, len);
+        reset_hdlc64_receive(m->e1_no);
+        LOG_W("Reset hdlc controller on link '%d'!\n", m->e1_no);
         return;
     }
 
@@ -532,8 +560,13 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
             
             m->state = MTP2_INSERVICE;
 
-        } else {
+            ram_params.e1_l2_alarm |= (1 << m->e1_no);
+            link_in_service(m->e1_no);
+            set_card_e1_led();
 
+        } else {
+            LOG_W("receive msu while state is not ready or inservice on link'%d', state=%d",
+            m->e1_no, m->state);
             return;
         }
     } else if(m->state == MTP2_READY) {
@@ -553,6 +586,9 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
                  bsn, m->retrans_last_acked, m->retrans_last_sent, m->e1_no, len, buf[3] & 0xf, m->state, m->bsn_errors);
         if (m->bsn_errors++ > 2) {
             m->bsn_errors = 0;
+
+            ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
+            link_outof_service(m->e1_no, LKALARM_EXECERROR);
             mtp3_link_fail(m, 1);
         }
         return;
@@ -646,8 +682,14 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
                             m->e1_no, buf[3] & 0xf, slc, m->sls, bib, bsn, fib, fsn, buf[3], li, pbuf));
         }
 #endif
-        LOG_HEX("mtp2", 16, &buf[3], len-3);
-        //send_ss7_msg(m->e1_no, &buf[3], len - 3);
+        //LOG_HEX("mtp2", 16, &buf[3], len-3);
+        u8_t sio = buf[3] & 0xf;
+        if (sio == 0 || sio == 1 || sio == 3 || sio == 4 || sio == 5) {
+            send_ss7_msg(m->e1_no, &buf[3], len - 3);
+        } else {
+            LOG_HEX("Error Msg", 16, &buf[3], len-3);
+        }
+        
     }
 }
 
@@ -659,6 +701,7 @@ static void mtp2_read_su(mtp2_t *m, u8_t *buf, int len)
 {
 	if((len > MTP_MAX_PCK_SIZE) || (len < 3)) {
 		LOG_W("Overlong/too short MTP2 frame %d, dropping on link '%d'", len, m->e1_no);
+        //LOG_HEX("Error", 16, buf, len);
 		return;
 	}
 
@@ -777,7 +820,7 @@ static void mtp2_thread(void *arg)
     LWIP_UNUSED_ARG(arg);
 
     mtp2_t *m;
-    TickType_t  xPeriod = pdMS_TO_TICKS(4); //2ms 运行一次
+    TickType_t  xPeriod = pdMS_TO_TICKS(4); //4ms 运行一次
 	TickType_t xLastWakeTime;
 	xLastWakeTime = xTaskGetTickCount();
 
@@ -837,23 +880,51 @@ void mtp_init(void)
 #endif
 }
 
+#define COMMAND_TIMEOUT     5000
+#define COMMAND_TIMEOUT_CHECK(t, compare_to)   ( (((u32_t)((t)-(compare_to))) > COMMAND_TIMEOUT) ? 1 : 0)
+
 void mtp2_command(u8_t e1_no, u8_t command)
 {
+    static u32_t last_time[E1_LINKS_MAX] = {0};
+
     mtp2_t *m = &mtp2_state[e1_no];
 
+    u32_t now = HAL_GetTick();
     switch (command) {
         case MTP2_ACTIVE_LINK:
-            start_initial_alignment(m, "User start!");
+            if (E1_PORT_ENABLE(e1_no)) {
+                u32_t less = now - last_time[e1_no];
+                if (less > 5000) 
+                {
+                    last_time[e1_no] = now;
+                    LOG_W("Active link'%d'", e1_no);
+                    start_initial_alignment(m, "usually start!");
+                }
+            }
             break;
         case MTP2_DEACTIVE_LINK:
-            abort_initial_alignment(m);
-            break;
-        case MTP2_STOP_L2:
+            LOG_W("Dective link'%d'", e1_no);
             abort_initial_alignment(m);
             m->state = MTP2_DOWN;
             break;
-        case MTP2_EMERGEN_ALIGNMENT:
-            start_initial_alignment(m, "Emergen start");
+        case MTP2_STOP_L2:
+            LOG_W("Stop link'%d'", e1_no);
+            abort_initial_alignment(m);
+            m->state = MTP2_DOWN;
+            break;
+        case MTP2_EMERGEN_ALIGNMENT:            
+            if (E1_PORT_ENABLE(e1_no)) {
+                u32_t less = now - last_time[e1_no];
+                if (less > 5000) 
+                {
+                    last_time[e1_no] = now;
+                    LOG_W("Active link'%d'", e1_no);
+                    start_initial_alignment(m, "Emergent start!");
+                }
+            }
+            break;
+        default:
+            LOG_W("unknow command = %x", command);
             break;
     }
 }
@@ -888,7 +959,6 @@ void send_ccs_msg(u8_t e1_no, u8_t send_len)
         ds26518_tx_set(e1_no, m->tx_buffer, m->tx_len, 1);
         m->tx_len = 0; // Reset it for next pick.
     }
-
 }
 
 void rv_ccs_byte(u8_t e1_no, u8_t data)
@@ -914,6 +984,8 @@ void check_ccs_msg(u8_t e1_no)
 
 void bad_msg_rev(u8_t e1_no, u8_t err)
 {
+    static u16_t error_count[8] = {0};
+    
     mtp2_t *m = &mtp2_state[e1_no];
 
     m->rx_len = 0;
@@ -923,7 +995,13 @@ void bad_msg_rev(u8_t e1_no, u8_t err)
      3: Abort.
      4: Overrun.
     */
-   LOG_W("%d E1 Receive error, err_no=%d", e1_no, err);
+   error_count[e1_no] ++;
+   if (error_count[e1_no] > 100) {
+       LOG_E("%d E1 Receive errors, count=%d", e1_no, error_count[e1_no]);
+       error_count[e1_no] = 0;
+       e1_port_init(e1_no);
+   }
+   
 }
 
 u8_t read_l2_status(int e1_no)
@@ -934,7 +1012,7 @@ u8_t read_l2_status(int e1_no)
         return 1;
     }
 
-    if (m->protocal == SS7_PROTO_TYPE && (m->state == MTP2_INSERVICE || m->state == MTP2_READY)) {
+    if (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_INSERVICE) {
         return 1;
     }
 

@@ -151,10 +151,17 @@ u32_t check_rx_change(int e1_no)
 
 u8_t read_liu_status(int e1_no)
 {
+	static u8_t liu_status[8];
+
 	LIU *l = ds26518_liu(e1_no);
 
-	u8_t ret = l->llsr;
-	l->llsr = ret;
+	u8_t ret = l->lrsr;
+	//l->llsr = ret;
+
+	if (liu_status[e1_no & 7] != ret) {
+		LOG_W("link '%d' liu status = %x", e1_no, ret);
+		liu_status[e1_no & 7] = ret;
+	}
 
 	return ret & 1;
 }
@@ -163,6 +170,7 @@ void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 {
 	FRAMER *f = ds26518_framer(e1_no);
 
+#if 0
 	if (slot == 0 || slot == 16) {
 		return;
 	}
@@ -176,6 +184,9 @@ void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 	} else {
 		f->tcice[index] |= bit_mask;
 	}
+#endif
+	f->tcice[0] = f->tcice[1] = f->tcice[2] = f->tcice[3] = 0;
+	f->rcice[0] = f->rcice[1] = f->rcice[2] = f->rcice[3] = 0;
 
 	LOG_D("'%d' E1 '%d' slot set %s , tcice=%02x %02x %02x %02x",
         e1_no, slot, active == VOICE_ACTIVE ? "Enable":"Disable", 

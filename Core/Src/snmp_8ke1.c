@@ -439,8 +439,11 @@ static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
             if (sub_oid <= 13 && sub_oid != 7) {
                 if (instance < E1_CARDS) {
                     if (sub_oid == 1) {
-                        e1_params.e1_enable[instance] = value ;
-                        //LOG_W("instance=%d, value=%x, eeprom value=%x", instance, value, e1_params.e1_enable[instance]);
+                        if (value != e1_params.e1_enable[instance] && instance == card_id) {
+                            update_e1_enable(value);
+                            //e1_params.e1_enable[instance] = value ;
+                        }
+                        
                     } else if (sub_oid == 2) {
                         e1_params.e1_l2_alarm_enable[instance] = value ;
                     } else if (sub_oid == 3) {
@@ -766,7 +769,7 @@ static void mtp2_trap_var_init(void)
     memset(&mtp2_trap_var, 0, sizeof(struct snmp_varbind));
 
     mtp2_trap_var.type = SNMP_ASN1_TYPE_OCTET_STRING;
-    snmp_oid_assign(&trap_var.oid, snmp_8ke1_mtp2_oid->id, snmp_8ke1_mtp2_oid->len);
+    snmp_oid_assign(&mtp2_trap_var.oid, snmp_8ke1_mtp2_oid->id, snmp_8ke1_mtp2_oid->len);
     mtp2_trap_var.value_len = sizeof(mtp2_heart_t);
     mtp2_trap_var.value = (void *)&mtp2_heart_msg;
 }

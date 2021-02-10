@@ -146,7 +146,7 @@ void StartDefaultTask(void *argument)
   mtp_init();
   for(;;)
   {
-    print_task();
+    //print_task();
     osDelay(10000);
   }
   /* USER CODE END StartDefaultTask */

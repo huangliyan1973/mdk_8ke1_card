@@ -14,17 +14,10 @@
 
 #define  OTHER_SIO			0x87
 #define  MTP2_COMMAND_SIO   0xFF
+#define  ISDN_SIO			0x08
 
-#define  IP_HEAD_SIZE	 (sizeof(struct ip_head))
 #define  MAPB_HEAD_SIZE  (sizeof(struct mapb_head))
 #define  OTHER_MSG_CONTENT_SIZE		5
-
-struct ss7_head {
-	u8_t		e1_no;
-	u8_t		len;
-	u8_t		sio;
-	u8_t		msg[1];
-}__attribute__ ((packed));
 
 struct mapb_head {
 	u8_t		msu_len;
@@ -35,19 +28,8 @@ struct mapb_head {
 	u8_t		msg_type;
 }__attribute__ ((packed));
 
-struct ip_head {
-	u8_t		msgCreatedTime[15];
-	u32_t	    msgSrcIp;
-	u16_t	    msgSrcPort;
-	u32_t	    msgDstIp;
-	u16_t 	    msgDstPort;
-	u32_t	    msgBroadcast;
-	u16_t	    msgLens;
-}__attribute__ ((packed));
-
 /* Receive from msc port: 4950 */
 struct other_msg {
-	struct ip_head		ip_head;
 	struct mapb_head	m_head;
 	u8_t				src_slot;
 	u8_t				dst_id;
@@ -58,7 +40,6 @@ struct other_msg {
 
 /* Send to msc port :4952 */
 struct msc_msg {
-	struct ip_head		ip_head;
 	struct mapb_head	m_head;
 	u8_t				src_slot;
 	u8_t				dst_id;
@@ -70,39 +51,36 @@ struct msc_msg {
 
 /* Send/Receive to/from msc  port : 4950 */ 
 struct ss7_msg {
-	struct ip_head 		ip_head;
-	struct ss7_head 	msg;
-}__attribute__ ((packed));
-
-/* Send to msc port : 4951 */ 
-struct isdn_msg {
-	struct ip_head		ip_head;
 	u8_t				e1_no;
 	u8_t				msg_len;
+	u8_t				contents[1];
+}__attribute__ ((packed));
+
+struct server_msg {
+	u8_t				e1_no;
+	u8_t				msg_len;
+	u8_t 				sio;
 	union{
 		struct{   
-			u8_t    pd;                     /* Protocol Discriminator */
-			u8_t    e1ip;                   /* E1_IP - 32 */
-			u8_t    primi;                  /* Primitive Type */
-		}__attribute__ ((packed)) primimsg;
+			u8_t    server_ip;                   /* SN_IP - 32, = 66/67 */
+			u8_t    command;                  /* Primitive Type */
+			u8_t    dest_ip[8];
+		}__attribute__ ((packed)) serv_comm;
 
 		struct{
-			u8_t    pd;                     /* Protocol Discriminator */
 			u8_t    cr_len;                 /* Call Reference Length */
 			u8_t    callref[2];             /* Call Reference */
 			u8_t    msgtype;                /* Message Type */
-			u8_t    l3content[1];         /* L3 Message Content */
-		}__attribute__ ((packed)) l3msg;
-	}__attribute__ ((packed)) msg;
+			u8_t    contents[1];         	/* L3 Message Content */
+		}__attribute__ ((packed)) isdn;
 
-}__attribute__ ((packed));
+		struct {
+			u8_t 	contents[1];
+		} __attribute__((packed)) ss7;
 
-union updmsg {
-	struct ss7_msg    ss7;
-	struct isdn_msg   isdn;
-	struct other_msg  other;
-	struct msc_msg    msc;
-}__attribute__ ((packed));
+	}__attribute__((packed)) msg;
+
+} __attribute__((packed));
 
 #define MTP2_ACTIVE_LINK	1
 #define MTP2_DEACTIVE_LINK	2
@@ -227,5 +205,13 @@ extern void link_in_service(int e1_no);
 extern void link_outof_service(int e1_no, u8_t alarm_code);
 
 extern void send_mtp2_trap_msg(void);
+
+extern void set_mtp2_heart_msg_dstip(u8_t *dstip);
+
+extern void send_card_heartbeat(u8_t dst_flag);
+
+extern void update_e1_enable(u8_t new_value);
+
+extern void set_card_e1_led(void);
 
 #endif /* INC_CSU_IF_H_ */
