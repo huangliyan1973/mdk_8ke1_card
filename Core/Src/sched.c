@@ -60,6 +60,9 @@ static void sched_timeout_abs(u32_t abs_time, sched_timeout_handler handler, voi
 
 void sched_timeout(u32_t msecs, sched_timeout_handler handler, void *arg)
 {
+    /* First delete the timer */
+    sched_untimeout(handler, arg);
+
     u32_t next_timeout_time;
 
     next_timeout_time = (u32_t)(HAL_GetTick() + msecs); /* overflow handled by TIME_LESS_THAN macro */

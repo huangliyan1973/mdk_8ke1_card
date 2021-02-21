@@ -565,8 +565,7 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
             set_card_e1_led();
 
         } else {
-            LOG_W("receive msu while state is not ready or inservice on link'%d', state=%d",
-            m->e1_no, m->state);
+            //LOG_W("receive msu while state is not ready or inservice on link'%d', state=%d",m->e1_no, m->state);
             return;
         }
     } else if(m->state == MTP2_READY) {
@@ -835,12 +834,11 @@ static void mtp2_thread(void *arg)
                 (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_TEI_UNASSIGNED)) {
                     continue;
                 }
-
-            //if (m->protocal == SS7_PROTO_TYPE && m->state > MTP2_DOWN)
-            //{
-            //ds26518_tx_rx_poll(0);
-			//sched_timeout_routine();
-            //printf("link '%d' poll tx and rx\n", i);
+#if 0
+            if (check_liu_status(i)) {
+                continue;
+            }
+#endif
             ds26518_tx_rx_poll(i);
             //}
        }

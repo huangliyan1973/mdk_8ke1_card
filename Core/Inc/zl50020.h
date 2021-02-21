@@ -84,6 +84,22 @@ struct zl50020_dev {
 	vu16	brer[32];	/* 0x360-0x37F BER Receiver Error Registers 0 - 31 */
 }__attribute__ ((packed));
 
+struct zl50020_cml {
+	vu16	sto_connect[32][256];
+}__attribute__ ((packed));
+
+/* IMS */
+#define PRBS_Receiver_Enable	(1 <<  5)
+#define PRBS_Transmitter_Enable	(1 << 4)
+
+/* BRCR */
+#define Bit_Error_Rate_Counter_Clear	(1 << 1)
+#define Bit_Error_Rate_Test_Start		(1 << 0)
+
+void enable_prbs_function(u8_t stream_no);
+
+void print_prbs_value(u8_t stream_no, int stop_flag);
+
 extern void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1);
 
 extern void connect_tone(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_stream);
@@ -104,6 +120,21 @@ extern void led_test(void);
 
 extern void module_test(void);
 
-extern void zl50020_test1(void);
+extern void connect_bert_slot(u8_t e1_no, u8_t slot);
 
+extern void send_msg(u16_t stream_no, u16_t slot, u8_t data);
+
+extern void zl50020_clkout_test(void);
+
+extern void zl50020_bitDelay(u8_t stream_no, u8_t bit_delay);
+
+extern void zl50020_bitAdvancement(u8_t stream_no, u8_t bit_adv);
+
+extern void zl50020_frac_bit_adv(u8_t stream_no);
+
+extern void read_zl50020_data_mem(u8_t stream_no, u8_t slot);
+
+extern void print_zl50020_cml_value(u16_t stream_no, u16_t slot);
+
+extern void print_zl50020(u8_t stream_no, u8_t slot);
 #endif /* INC_ZL50020_H_ */

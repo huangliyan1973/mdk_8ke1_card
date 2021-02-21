@@ -11,7 +11,7 @@
 #include "ds26518.h"
 #include "main.h"
 #include "usart.h"
-
+#include "zl50020.h"
 #include "mtp.h"
 #include "lwip/sys.h"
 #include "lwip/def.h"
@@ -24,7 +24,7 @@
 #define DS26518_BASE			(0x64000000)
 #define DS26518_DEVICE			(DEVICE *)DS26518_BASE
 
-#define MTP_DEBUG                CARD_DBG_ON
+//#define IBO_ENABLE
 
 static FRAMER *ds26518_global_framer(void)
 {
@@ -54,6 +54,18 @@ static LIU *ds26518_liu(int e1_no)
 	return (LIU *)&dev->liu[e1_no];
 }
 
+static BERT *ds26518_bert(int e1_no)
+{
+	DEVICE *dev = DS26518_DEVICE;
+	return (BERT *)&dev->bert[e1_no];
+}
+
+static EXTBERT *ds26518_exbert(int e1_no)
+{
+    DEVICE *dev = DS26518_DEVICE;
+	return (EXTBERT *)&dev->extbert[e1_no];
+}
+
 #if 0
 static HDLC *ds26518_hdlc(int e1_no)
 {
@@ -69,11 +81,11 @@ void set_ds26518_interrupt(int e1_no, int enable)
 	if (enable) {
 		f->gfimr1 |= (1 << e1_no);
 		f->glimr1 |= (1 << e1_no);
-		LOG_I("Enable '%d' E1 interrupt", e1_no);
+		//LOG_I("Enable '%d' E1 interrupt", e1_no);
 	} else {
 		f->gfimr1 &= ~(1 << e1_no);
 		f->glimr1 &= ~(1 << e1_no);
-		LOG_I("Disable '%d' E1 interrupt", e1_no);
+		//LOG_I("Disable '%d' E1 interrupt", e1_no);
 	}
 }
 
@@ -82,10 +94,10 @@ void set_ds26518_global_interrupt(int enable)
 	FRAMER *f = ds26518_global_framer();
 	if (enable) {
 		f->gtcr1 &= ~GTCR1_GIPI;
-		LOG_I("Enable E1 global interrupt");
+		//LOG_I("Enable E1 global interrupt");
 	} else {
 		f->gtcr1 |= GTCR1_GIPI;
-		LOG_I("Disable E1 global interrupt");
+		//LOG_I("Disable E1 global interrupt");
 	}
 }
 
@@ -155,7 +167,7 @@ u8_t read_liu_status(int e1_no)
 
 	LIU *l = ds26518_liu(e1_no);
 
-	u8_t ret = l->lrsr;
+	u8_t ret = (l->lrsr > 0 ? 1 : 0);
 	//l->llsr = ret;
 
 	if (liu_status[e1_no & 7] != ret) {
@@ -163,7 +175,16 @@ u8_t read_liu_status(int e1_no)
 		liu_status[e1_no & 7] = ret;
 	}
 
-	return ret & 1;
+	return ret;
+}
+
+/* >0 mean liu has some problem */
+u8_t check_liu_status(int e1_no)
+{
+	LIU *l = ds26518_liu(e1_no);
+	u8_t ret = l->llsr;
+	l->llsr = ret;
+	return ret;
 }
 
 void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
@@ -349,11 +370,11 @@ void ds26518_global_init(void)
 	}
 	/* GTCR1
 	 * RLOF output,
-	 * 528MD enabled,
+	 * 528MD disable,
 	 * disable global interrupt
 	 * use internal ibo mux
 	 * */
-	f->gtcr1 = GTCR1_GPSEL(0) | GTCR1_GIPI ; //| GTCR1_528MD;
+	f->gtcr1 = GTCR1_GPSEL(0) | GTCR1_GIPI ; 
 
 	/* GFCR1
 	 * BIT7-BIT6 = 3: IBO MODE: 16.384M (8 devices on TSER1 and RSER1)
@@ -362,23 +383,33 @@ void ds26518_global_init(void)
 	 * TCHBLK/TCHCLK[8:1] pins output TCHBLK[8:1] (Transmit Channel Block)
 	 * RCHBLK/RCHCLK[8:1] pins output RCHBLK[8:1] (Receive Channel Block)
 	 */
-	f->gfcr1 = GFCR1_IBOMS(3) | GFCR1_BPCLK(3) ;
-
 	/* GTCR3
 	 * Bit 1 = 0, TSSYNCIOn are Input PIN.
 	 * 		 = 1, TSSYNCIOn are Output sync to BPCLK1.
 	 * Bit 0 = 0, TSYNCn is selected for TSYNC/TSSYNCIO[8:1] pins
 	 *       = 1, TSSYNCIOn is selected for TSYNC/TSSYNCIO[8:1] pins.
 	 */
+#ifdef IBO_ENABLE
+	f->gfcr1 = GFCR1_IBOMS(3) | GFCR1_BPCLK(3);
 	f->gtcr3 = 0x3;
+#else
+	f->gfcr1 = GFCR1_IBOMS(0) | GFCR1_BPCLK(3); // disable IBO, 8.192M BPCLK1
+	f->gtcr3 = 0x0;
+#endif
 
 	/*GTCCR3
 	 * BIT6 = 1 Use BPCLK1 as the master clock for all eight receive system clocks (Channels 1–8).
+	 * 		= 0 Use RSYSCLKn pins for each receive system clock (Channels 1–8).
 	 * BIT5 = 1 Use BPCLK1 as the master clock for all eight transmit system clocks (Channels 1–8).
+	 * 		= 0 Use TSYSCLKn pins for each transmit system clock (Channels 1–8).
 	 * BIT4 = 0: Use TCLKn pins for each of the transmit clock (Channels 1–8).
 	 * 		= 1: Use REFCLKIO as the master clock for all eight transmit clocks (Channels 1–8).
 	 */
-	f->gtccr3 = GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL ;
+#ifdef IBO_ENABLE
+	f->gtccr3 = GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL | GTCCR3_TCLKSEL;
+#else
+	f->gtccr3 = GTCCR3_TCLKSEL; //GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL ;
+#endif
 
 	set_ds26518_global_interrupt(0);
 
@@ -490,7 +521,11 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 * Bit 4 = 1, Frame Interleave.
 	 * Bit 3 = 1, Interleave Bus Operation enabled.
 	 */
+#ifdef IBO_ENABLE
 	f->tiboc = TIBOC_IBOSEL | TIBOC_IBOEN;
+#else
+	f->tiboc = 0;
+#endif
 
 	/* E1AF, MUST be 0x1b */
 	f->tslc1_taf = 0x1b;
@@ -502,15 +537,19 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 * Bit7 = 0, TCLKn No inversion.
 	 * Bit6 = 0, TSYNCn No inversion.
 	 * Bit5 = 0, TSSYNCIOn No inversion.
+	 * 
 	 * Bit4 = 1, If TSYSCLKn is 2.048/4.096/8.192MHz or IBO enabled.
 	 * Bit3 = 0, TSSYNCIOn Mode Select Frame mode.
 	 * Bit2 = 0, TSYNCn I/O Select input.
 	 * Bit0 = 0, TSYNCn Mode Select Frame mode.
 	 */
-	f->tiocr = TIOCR_TSCLKM;
+	//f->tiocr = TIOCR_TSCLKM;
+	f->tiocr = TIOCR_TSIO | TIOCR_TSCLKM; //定义TSYNC为输出
 
 	/* Transmit Elastic store is enabled */
+	/* disable transmit elastic store 2021.2.18*/
 	f->tescr = TESCR_TESE;
+	//f->tescr = 0;
 
 	/* TXPC
 	 * Bit 7 = 0 ,Transmit HDLC-256 Mode Select assigned to time slots
@@ -527,7 +566,7 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	memset((void *)f->ssie, 0, 4);
 
 	/* The Transmit Idle Code Definition Registers */
-	memset((void *)f->tidr, 0xD5, 32);
+	memset((void *)f->tidr, 0x55, 32);
 
 	/* The Transmit Channel Idle Code Enable registers */
 	ds26518_tcice_init(e1_no);
@@ -537,7 +576,8 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	f->tsacr = 0x0;
 
 	/* 设置接收端参数 */
-	f->rmmr |= RMMR_FRM_EN | RMMR_T1E1 | RMMR_DRSS;
+	//f->rmmr |= RMMR_FRM_EN | RMMR_T1E1 | RMMR_DRSS;
+	f->rmmr |= RMMR_FRM_EN | RMMR_T1E1 ;
 
 	/* RCR1
 	 * Bit 6 = 1, HDB3 enabled
@@ -574,7 +614,11 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 * Bit 4 = 1, Frame Interleave.
 	 * Bit 3 = 1, Interleave Bus Operation enabled.
 	 */
+#ifdef IBO_ENABLE
 	f->riboc = RIBOC_IBOSEL | RIBOC_IBOEN;
+#else
+	f->riboc = 0;
+#endif
 
 
 	l->ltrcr = 0x0; //Jitter attenuator FIFO depth 128 bits and in the receive path. E1,G.775
@@ -598,9 +642,6 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 
 	HAL_Delay(1);
 	
-	//for test.
-	//set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
-
 	/* Open interrupt */
 	f->rim1 |= RIM1_RLOSD | RIM1_RLOFD | RIM1_RLOSC | RIM1_RLOFC;
 	f->rim2 = RIM2_RAF;
@@ -613,6 +654,13 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 
 	/* Last interrupt global active step */
 	set_ds26518_global_interrupt(1);
+#if 0    
+	ds26518_mon_test2(e1_no, 1);
+	set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
+	HAL_Delay(1);
+	ds26518_mon_test2(e1_no, 1);
+#endif
+	LOG_D("E1 port '%d' init finished!", e1_no);
 
 }
 
@@ -831,15 +879,15 @@ void ds26518_test(void)
 		goto fault;
 	}
 
-	if (f->gfcr1 != (GFCR1_IBOMS(3) | GFCR1_BPCLK(3))) {
+	if (f->gfcr1 != GFCR1_BPCLK(3)) {
 		goto fault;
 	}
 
-	if (f->gtcr3 != 3) {
+	if (f->gtcr3 != 0) {
 		goto fault;
 	}
 
-	if (f->gtccr3 != (GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL)) {
+	if (f->gtccr3 != GTCCR3_TCLKSEL) {
 		goto fault;
 	}
 
@@ -848,6 +896,154 @@ void ds26518_test(void)
 
 fault:
 	LOG_E("DS26518 TEST FAILED!");
+}
+
+void ds26518_monitor_tx_slot(int e1_no, int slot)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	f->tds0sel = slot & 0x1f;
+}
+
+void ds26518_monitor_rx_slot(int e1_no, int slot)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	f->rdsosel = slot & 0x1f;
+}
+
+u8_t ds26518_read_monitor_tx_slot(int e1_no)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	return f->tdsom;
+}
+
+u8_t ds26518_read_monitor_rx_slot(int e1_no)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	return f->rdsom;
+}
+
+void ds26518_mon_test2(int e1_no, int slot)
+{
+    FRAMER *f = ds26518_framer(e1_no);
+	HAL_Delay(1);
+	ds26518_monitor_tx_slot(e1_no, slot);
+    ds26518_monitor_rx_slot(e1_no, slot);
+
+	LOG_I("Now print E1 '%d' slot '%d' tx, rx data", e1_no, slot);
+    print_zl50020_cml_value(0, slot);
+    for(int i = 0; i < 10; i++){
+        LOG_D("tx_data = %x, rx_data = %x", f->tdsom, f->rdsom);
+    }
+    
+	read_zl50020_data_mem(0, slot);
+}
+
+void ds26518_monitor_test(int e1_no, int slot)
+{
+    FRAMER *f = ds26518_framer(e1_no);
+    ds26518_port_init(e1_no, CCS_TYPE);
+    ds26518_monitor_tx_slot(e1_no, slot);
+    ds26518_monitor_rx_slot(e1_no, slot);
+	ds26518_e1_slot_enable(e1_no,slot,VOICE_ACTIVE);
+
+	//zl50020_bitDelay(0, 7);
+	//zl50020_bitAdvancement(0,1);
+	//zl50020_frac_bit_adv(0);
+/*
+    if (slot < 8) {
+        f->rcice[0] = 1 << slot;
+    } else if (slot < 16) {
+        f->rcice[1] = 1 << (slot - 8);
+    } else if (slot < 24) {
+        f->rcice[2] = 1 << (slot - 16);
+    } else {
+        f->rcice[3] = 1 << (slot - 24);
+    }
+	f->ridr[slot] = 0x15;
+*/
+	//f->tcice[0] = 0xfe;
+	//f->tidr[slot] = 0x22;
+
+	//read_zl50020_data_mem(0, slot);
+	connect_tone(slot, e1_no, 0, TONE_STREAM);
+
+	
+    //set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
+    HAL_Delay(4);
+    LOG_I("Now print E1 '%d' slot '%d' tx, rx data", e1_no, slot);
+    print_zl50020_cml_value(0, slot);
+    for(int i = 0; i < 10; i++){
+        LOG_D("tx_data = %x, rx_data = %x", f->tdsom, f->rdsom);
+    }
+    
+	read_zl50020_data_mem(0, slot);
+}
+
+void ds26518_BERT_error_insert_rate(int e1_no, int err_rate)
+{
+	BERT *bert = ds26518_bert(e1_no);
+
+	/* 0: No errors automatically inserted 
+	*  1: 10E-1
+	*  2: 10E-2
+	*  3: 10E-3
+	*  4-7: 10E-4 ~~ 10E-7
+	*/
+	bert->bc2 = BC2_EIB(err_rate & 7);
+}
+
+void ds26518_enable_bert(int e1_no, int pattern)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	BERT *bert = ds26518_bert(e1_no);
+
+    e1_port_init(e1_no);
+	/* System (backplane) operation. Rx BERT port receives data from the transmit path. The transmit path enters the receive BERT on the line side of the elastic store (if enabled). */
+	f->rxpc = RXPC_RBPEN | RXPC_RPPDIR; 
+
+	/* System (backplane) operation. Transmit BERT port sources data into the receive path (RSERn). In this mode, the data from the BERT is muxed into the receive path. */
+	f->txpc = TXPC_TBPEN | TXPC_TBPDIR;
+
+	f->rbpcs[0] = 0x2; // enable slot 1 (from 0 index);
+	f->tbpcs[0] = 0x2; // enable slot 1
+    
+    connect_bert_slot(e1_no, 1);
+
+	ds26518_BERT_error_insert_rate(e1_no, 0);
+	/* 0: Pseudorandom 2E7–1
+	*  1: Pseudorandom 2E11–1
+	*  2: Pseudorandom 2E15–1
+	*  3: Pseudorandom Pattern QRSS. A 2 20- 1 pattern with 14 consecutive zero restriction
+	*  4: Repetitive Pattern
+	*  5: Alternating Word Pattern
+	*  6: Modified 55 Octet (Daly) Pattern
+	*  7: Pseudorandom 2E-9-1
+	*/
+	bert->bc1 = BC1_PS(pattern & 7);
+
+	if (pattern == 4) {
+		bert->brp[0] = 0xad;
+		bert->brp[1] = 0xb5;
+		bert->brp[2] = 0xd6;
+		bert->brp[3] = 0x5a;
+	} else {
+		memset((void *)(bert->brp), 0xff, 4);
+	}
+
+	/* start tc */
+    HAL_Delay(1);
+	bert->bc1 |= (BC1_TC | BC1_LC);
+}
+
+void ds26518_bert_report(int e1_no)
+{
+    EXTBERT *ebert = ds26518_exbert(e1_no);
+	BERT *bert = ds26518_bert(e1_no);
+    
+    LOG_W("BERT Status Register = %X, Real Status = %X", bert->bsr, ebert->brsr);
+    LOG_W("BERT Latched Status = %X/%X", ebert->blsr1, ebert->blsr2);
+    LOG_W("BERT Bit Counter = %d", (u32_t)bert->bbc[0] | (u32_t)bert->bbc[1] << 8 | (u32_t)bert->bbc[2] << 16 | (u32_t)bert->bbc[3] << 24);
+    LOG_W("BERT Bit Error = %d", (u32_t)bert->bec[0] | (u32_t)bert->bec[1] << 8 | (u32_t)bert->bec[2] << 16);
 }
 
 #if 0

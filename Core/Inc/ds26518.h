@@ -1410,4 +1410,20 @@ extern void ds26518_tx_rx_poll(int e1_no);
 
 extern void ds26518_test(void);
 
+extern void ds26518_enable_bert(int e1_no, int pattern);
+
+extern void ds26518_bert_report(int e1_no);
+
+extern u8_t check_liu_status(int e1_no);
+
+extern void ds26518_monitor_tx_slot(int e1_no, int slot);
+
+extern void ds26518_monitor_rx_slot(int e1_no, int slot);
+
+extern u8_t ds26518_read_monitor_tx_slot(int e1_no);
+
+extern u8_t ds26518_read_monitor_rx_slot(int e1_no);
+
+extern void ds26518_mon_test2(int e1_no, int slot);
+
 #endif /* Build for Specific Driver */

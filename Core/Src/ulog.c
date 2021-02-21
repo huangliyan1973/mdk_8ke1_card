@@ -51,6 +51,7 @@ struct rt_ulog
 
 
 /* level output info */
+/**
 static const char *const level_output_info[] =
     {
         "A/",
@@ -62,6 +63,7 @@ static const char *const level_output_info[] =
         "I/",
         "D/",
 };
+**/
 
 /* color output info */
 static const char *const color_output_info[] =

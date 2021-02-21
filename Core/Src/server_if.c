@@ -53,6 +53,7 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
                 connect_tone(src_slot, src_port, dst_slot, TONE_STREAM);
             } else {
                 connect_slot(src_slot, src_port, dst_slot, dst_port);
+                ds26518_mon_test2(src_port, src_slot);
             }
             break;
         case CON_TONE:
@@ -737,7 +738,16 @@ void period_20ms_proc(void *arg)
 
 void period_500ms_proc(void *arg)
 {
+    static u32_t led_status = 0;
+
     (void)arg;
+
+    led_status++;
+    if (led_status & 1) {
+        LED2_GREEN_ON;
+    } else {
+        LED2_OFF;
+    }
 
     update_e1_l1_status();
 

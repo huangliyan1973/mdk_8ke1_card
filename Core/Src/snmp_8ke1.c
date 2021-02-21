@@ -14,6 +14,7 @@
 #include "usart.h"
 #include "eeprom.h"
 #include "server_interface.h"
+#include "zl50020.h"
 
 #define LOG_TAG              "snmp"
 #define LOG_LVL              LOG_LVL_DBG
@@ -658,12 +659,16 @@ static err_t snmp_process_set_request(struct snmp_request *request)
 
 static void snmp_process_trap_request(struct snmp_request *request)
 {
+    static u32_t last_rev_sn_ht_time = 0;
+    u32_t now;
+    ip4_addr_t *sn = (plat_no == 0 ? &sn0 : &sn1);
+
     snmp_vb_enumerator_err_t err;
     struct snmp_varbind vb;
     vb.value = request->value_buffer;
-    
-    LWIP_DEBUGF(SNMP_DEBUG, ("SNMP trap request\n"));
-    
+
+    now = HAL_GetTick();
+
     if (request->error_status == SNMP_ERR_NOERROR) {
         err = snmp_vb_enumerator_get_next(&request->inbound_varbind_enumerator, &vb);
         if (err == SNMP_VB_ENUMERATOR_ERR_OK) {
@@ -672,9 +677,18 @@ static void snmp_process_trap_request(struct snmp_request *request)
                 if (ip4_addr_cmp(request->source_ip, &omc)) {
                     ram_params.timestamp = PP_HTONL(heart_msg->timestamp);
                     LOG_I("Got OMC Server timestamp = %d", ram_params.timestamp);
+                } else if (ip4_addr_cmp(request->source_ip, sn)) {
+                    last_rev_sn_ht_time = now;
+                    //LOG_I("Got SN Server timestampe = %d", PP_HTONL(heart_msg->timestamp));
+                    LED1_GREEN_ON;
                 }
             }
         } 
+    }
+
+    if ((now - last_rev_sn_ht_time) > 11000)
+    {
+        LED1_RED_ON;
     }
 }
 

@@ -1,13 +1,4 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * File Name          : freertos.c
-  * Description        : Code for freertos applications
-  ******************************************************************************
-  * @attention
-  *
-  * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
-  * All rights reserved.</center></h2>
+/** All rights reserved.</center></h2>
   *
   * This software component is licensed by ST under Ultimate Liberty license
   * SLA0044, the "License"; You may not use this file except in compliance with
@@ -37,6 +28,9 @@
 #define LOG_TAG              "thread"
 #define LOG_LVL              LOG_LVL_DBG
 #include "ulog.h"
+
+#define BERT_TEST
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,6 +51,7 @@ void print_task(void)
     printf("\n%s\n",buf);
 }
 
+extern void ds26518_monitor_test(int e1_no, int slot);
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -144,9 +139,32 @@ void StartDefaultTask(void *argument)
   sched_timeout_init();
 
   mtp_init();
-  for(;;)
+
+#ifdef BERT_TEST
+  //enable_prbs_function(5);
+  //ds26518_enable_bert(2,1);
+  //HAL_Delay(500);
+  //ds26518_bert_report(2);
+  //send_msg(0,1,0x75);
+  //zl50020_clkout_test();
+  //set_ds26518_loopback(1, FRAME_LOCAL_LP);
+  
+  //ds26518_monitor_test(0, 2);
+  //connect_slot(1,0,1,0);
+  //connect_slot(2,0,2,0);
+  //connect_slot(1,8, 1, 0);
+  //print_zl50020();
+  //test_prbs();
+#endif
+  for (;;)
   {
+    //LOG_W("LIU 0 status = %x",check_liu_status(0));
+    //print_zl50020(0,0);
     //print_task();
+#ifdef BERT_TEST
+    //print_prbs_value(5, 0);
+    //ds26518_bert_report(2);
+#endif
     osDelay(10000);
   }
   /* USER CODE END StartDefaultTask */

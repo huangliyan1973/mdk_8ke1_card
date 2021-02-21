@@ -79,7 +79,7 @@ void init_eeprom(void)
         e1_params.version = E1_CARD_VERSION;
         
         for( int i = 0; i < E1_CARDS; i++) {
-            e1_params.e1_enable[i] = 0x02;
+            e1_params.e1_enable[i] = 0x01;
             e1_params.e1_l2_alarm_enable[i] = 0xff;
             e1_params.e1_port_type[i] = SS7_PORT;
             e1_params.isdn_port_type[i] = PRI_CPE;

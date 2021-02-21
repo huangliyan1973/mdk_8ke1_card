@@ -132,10 +132,19 @@ int main(void)
 
   ds26518_test();
 
-  HAL_Delay(100);
+  HAL_Delay(1000);
 
   zl50020_test();
 
+
+  for (int i = 1; i < 15; i++) {
+    //ds26518_monitor_test(0, i);
+  }
+
+  ds26518_monitor_test(0, 1);
+
+  print_zl50020(5,1);
+  
   init_eeprom();
 
   sram_test();
