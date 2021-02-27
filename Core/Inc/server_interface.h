@@ -214,4 +214,8 @@ extern void update_e1_enable(u8_t new_value);
 
 extern void set_card_e1_led(void);
 
+extern void init_r2_param(void);
+
+extern void init_mfc_slot(void);
+
 #endif /* INC_CSU_IF_H_ */

@@ -255,6 +255,8 @@ typedef struct mtp2_state{
 
 	int protocal;
 
+	int init_down;
+
 	/****************************ISDN PRI Part *************************/
 
 	int pri_mode;

@@ -528,12 +528,16 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
 
     li = buf[2] & 0x3f;
 
+    if (li == 0x3f) {
+        li = len - 3;
+    }
+
     if (li + 3 > len) {
         LOG_W("Got unreasonable length indicator %d (len=%d) on link '%d'.",
                  li, len, m->e1_no);
-        LOG_HEX("Error", 16, buf, len);
-        reset_hdlc64_receive(m->e1_no);
-        LOG_W("Reset hdlc controller on link '%d'!\n", m->e1_no);
+        //LOG_HEX("Error", 16, buf, len);
+        //reset_hdlc64_receive(m->e1_no);
+        //LOG_W("Reset hdlc controller on link '%d'!\n", m->e1_no);
         return;
     }
 
@@ -742,6 +746,8 @@ void e1_port_init(int e1_no)
         return;
 
     mtp2_t *m = &mtp2_state[e1_no];
+    memset((void *)m, 0, sizeof(mtp2_t));
+
     if (!CHN_NO1_PORT_ENABLE(e1_no)) {       
         prepare_init_link(e1_no);
         if (SS7_PORT_ENABLE(e1_no)) { /* ss7 */
@@ -761,7 +767,9 @@ void e1_port_init(int e1_no)
         ds26518_port_init(e1_no, CAS_TYPE);
         m->protocal = NO1_PROTO_TYPE;
     }
-    
+
+    m->init_down = 1;
+
     LOG_D("link '%d' protocal = %d, pri_mode = %d", e1_no, m->protocal, m->pri_mode);
     
 }
@@ -896,19 +904,44 @@ void mtp2_command(u8_t e1_no, u8_t command)
                 {
                     last_time[e1_no] = now;
                     LOG_W("Active link'%d'", e1_no);
-                    start_initial_alignment(m, "usually start!");
+                    if (m->init_down) {
+                        if (m->protocal == SS7_PROTO_TYPE) {
+                            start_initial_alignment(m, "usually start!");
+                        } else if (m->protocal == PRI_PROTO_TYPE) {
+
+                        }
+                    } else {
+                        e1_port_init(e1_no);
+                    }                    
                 }
             }
             break;
         case MTP2_DEACTIVE_LINK:
             LOG_W("Dective link'%d'", e1_no);
-            abort_initial_alignment(m);
-            m->state = MTP2_DOWN;
+            if (m->init_down) {
+                if (m->protocal == SS7_PROTO_TYPE) {
+                    abort_initial_alignment(m);
+                    m->state = MTP2_DOWN;
+                } else if (m->protocal == PRI_PROTO_TYPE) {
+                    
+                }
+            } else {
+                
+            }
             break;
         case MTP2_STOP_L2:
             LOG_W("Stop link'%d'", e1_no);
-            abort_initial_alignment(m);
-            m->state = MTP2_DOWN;
+            if (m->init_down) {
+                if (m->protocal == SS7_PROTO_TYPE) {
+                    abort_initial_alignment(m);
+                    m->state = MTP2_DOWN;
+                } else if (m->protocal == PRI_PROTO_TYPE) {
+
+                }
+            } else {
+
+            }
+            
             break;
         case MTP2_EMERGEN_ALIGNMENT:            
             if (E1_PORT_ENABLE(e1_no)) {
@@ -916,8 +949,16 @@ void mtp2_command(u8_t e1_no, u8_t command)
                 if (less > 5000) 
                 {
                     last_time[e1_no] = now;
-                    LOG_W("Active link'%d'", e1_no);
-                    start_initial_alignment(m, "Emergent start!");
+                    LOG_W("Emergent Active link'%d'", e1_no);
+                    if (m->init_down) {
+                        if (m->protocal == SS7_PROTO_TYPE) {
+                            start_initial_alignment(m, "Emergent start!");
+                        } else if (m->protocal == PRI_PROTO_TYPE) {
+
+                        }
+                    } else {
+                        e1_port_init(e1_no);
+                    }               
                 }
             }
             break;

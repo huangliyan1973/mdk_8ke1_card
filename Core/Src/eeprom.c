@@ -68,6 +68,84 @@ void reload_eeprom(void)
 	e1_params = *(e1_params_t *)ADDR_FLASH_SECTOR;
 }
 
+void init_tone_cadence(void)
+{
+  /*ªÿ¡Â“Ù*/
+  u8_t *pdata = &e1_params.tone_cadence0[0];
+  pdata[0] = 16;
+  pdata[1] = 100;
+  pdata[2] = 0xff;
+  pdata[3] = 0xff;
+  pdata[4] = 0xff;
+  memset(&pdata[5], 0, 13);
+
+  /*√¶“Ù*/
+  pdata = &e1_params.tone_cadence1[0];
+  pdata[0] = 16;
+  pdata[1] = 14;
+  pdata[2] = 0xfe;
+  memset(&pdata[3], 0, 15);
+
+  /*ø’∫≈“Ù*/
+  pdata = &e1_params.tone_cadence2[0];
+  pdata[0] = 16;
+  pdata[1] = 14;
+  pdata[2] = 0xfe;
+  memset(&pdata[3], 0, 15);
+
+  /*Ã·–—“Ù*/
+  pdata = &e1_params.tone_cadence3[0];
+  pdata[0] = 19;
+  pdata[1] = 100;
+  pdata[2] = 0xf0;
+  pdata[3] = 0x3c;
+  pdata[4] = 0x0f;
+  memset(&pdata[5], 0, 13);
+
+  /*÷§ µ“Ù*/
+  pdata = &e1_params.tone_cadence4[0];
+  pdata[0] = 16;
+  pdata[1] = 100;
+  pdata[2] = 0xf0;
+  pdata[3] = 0x3c;
+  pdata[4] = 0x0f;
+  memset(&pdata[5], 0, 13);
+
+  /*∫Ù»Îµ»¥˝“Ù*/
+  pdata = &e1_params.tone_cadence5[0];
+  pdata[0] = 16;
+  pdata[1] = 88;
+  pdata[2] = 0xff;
+  memset(&pdata[3], 0, 15);
+
+  /*±£¡Ù*/
+  pdata = &e1_params.tone_cadence6[0];
+  pdata[0] = 0;
+  pdata[1] = 0;
+  pdata[2] = 0;
+  memset(&pdata[3], 0, 15);
+
+  /*±£¡Ù*/
+  pdata = &e1_params.tone_cadence7[0];
+  pdata[0] = 0;
+  pdata[1] = 0;
+  pdata[2] = 0;
+  memset(&pdata[3], 0, 15);
+
+  /*tone”Ô“Ù∂‘’’±Ì*/
+  pdata = &e1_params.reason_to_tone[0];
+  pdata[0] = 0;
+  pdata[1] = 1;
+  pdata[2] = 2;
+  pdata[3] = 5;
+  pdata[4] = 4;
+  pdata[5] = 1;
+  pdata[6] = 1;
+  pdata[7] = 1;
+  pdata[8] = 0;
+  pdata[9] = 3;
+  memset(&pdata[10], 0, 6);
+}
 
 void init_eeprom(void)
 {
@@ -87,22 +165,10 @@ void init_eeprom(void)
             e1_params.crc4_enable[i] = CRC4_DISABLE;
             e1_params.no1_enable[i] = NO1_DISABLE;
         }
-        
-        e1_params.tone_cadence0[0] = 3;
-        
-        e1_params.tone_cadence0[1] = 100;
-        e1_params.tone_cadence1[1] = 100;
-        e1_params.tone_cadence2[1] = 100;
-        e1_params.tone_cadence3[1] = 100;
-        e1_params.tone_cadence4[1] = 100;
-        e1_params.tone_cadence5[1] = 100;
-        e1_params.tone_cadence6[1] = 100;
-        e1_params.tone_cadence7[1] = 100;
-        
-        e1_params.tone_cadence0[2] = 0xff;
-        e1_params.tone_cadence0[3] = 0xff;
-        e1_params.tone_cadence0[4] = 0xff;
-        memset(&e1_params.tone_cadence0[5], 0, 18-5);
+
+        //e1_params.no1_enable[0] = 1;
+
+        //init_tone_cadence();        
 
         //update_eeprom();
     }

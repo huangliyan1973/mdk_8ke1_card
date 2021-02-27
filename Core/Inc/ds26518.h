@@ -5,6 +5,8 @@
 
 /* STM32F407 PA5 connect to DS26518 INT pin */
 
+#define MAX_E1_TIMESLOTS	32
+
 typedef volatile unsigned char VUC;
 typedef unsigned char UC;
 
@@ -1398,11 +1400,9 @@ extern void ds26518_isr(void);
 
 extern void ds26518_tx_set(u8_t e1_no, u8_t *buf, u8_t len, u8_t end_flag);
 
-extern u8_t read_rx_abcd(int e1_no, u8_t slot);
+extern void read_rx_abcd(int e1_no, u8_t *rv_abcd);
 
 extern void out_tx_abcd(int e1_no, u8_t slot, u8_t value);
-
-extern u32_t check_rx_change(int e1_no);
 
 extern u8_t read_liu_status(int e1_no);
 
@@ -1424,6 +1424,12 @@ extern u8_t ds26518_read_monitor_tx_slot(int e1_no);
 
 extern u8_t ds26518_read_monitor_rx_slot(int e1_no);
 
+extern void ds26518_monitor_test(int e1_no, int slot);
+
 extern void ds26518_mon_test2(int e1_no, int slot);
+
+extern void ds26518_frame_status(int e1_no);
+
+extern void ds26518_bert_test(int e1_no, int slot, int system_direction);
 
 #endif /* Build for Specific Driver */

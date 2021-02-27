@@ -51,7 +51,6 @@ void print_task(void)
     printf("\n%s\n",buf);
 }
 
-extern void ds26518_monitor_test(int e1_no, int slot);
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -133,12 +132,14 @@ void StartDefaultTask(void *argument)
   /* init code for LWIP */
   MX_LWIP_Init();
   /* USER CODE BEGIN StartDefaultTask */
-  snmp_8ke1_init();
-  server_interface_init();
+  mtp_init();
+  
   //shell_init();
   sched_timeout_init();
 
-  mtp_init();
+  server_interface_init();
+
+  snmp_8ke1_init();
 
 #ifdef BERT_TEST
   //enable_prbs_function(5);

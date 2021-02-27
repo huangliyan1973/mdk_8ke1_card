@@ -136,20 +136,25 @@ int main(void)
 
   zl50020_test();
 
-
-  for (int i = 1; i < 15; i++) {
-    //ds26518_monitor_test(0, i);
-  }
-
   ds26518_monitor_test(0, 1);
 
-  print_zl50020(5,1);
+  //print_zl50020(5,1);
   
   init_eeprom();
 
   sram_test();
 
   module_test();
+
+  for (int i = 0; i < 16; i++) {
+    mfc_t32_zl50020_test(i);
+  }
+  
+  //ds26518_bert_test(0, 1, 0);
+  
+  //set_ds26518_master_clock(LIU_RCLK1);
+  //for(;;){}
+  
   /* USER CODE END 2 */
 
   /* Init scheduler */

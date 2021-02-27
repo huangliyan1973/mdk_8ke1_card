@@ -47,6 +47,8 @@
 
 extern u8_t card_id;
 
+static int zl50020_inited = 0;
+
 void zl50020_connect_memory_init(u8_t stream_no)
 {
     #if 0
@@ -138,6 +140,8 @@ void zl50020_init(void)
     for (int i = 0; i < 9; i++){
         zl50020_connect_memory_init(i);
     }
+
+    zl50020_inited = 1;
     
 }
 
@@ -169,30 +173,42 @@ void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
     struct zl50020_cml *cml = ZL_CML;
 
     uint16_t i_stream, i_slot, conn_value;
-    uint16_t o_slot;
+    uint16_t o_slot, o_stream;
 
-    i_slot = ((i_e1 & 7) << 5) | i_ts;
-
-    if ((i_e1 >> 3) == card_id) {
-        i_stream = 0;
-        LOG_I("local card switch, i_e1 = %d, card_id=%d, i_stream=%d, i_slot=0x%x", i_e1, card_id, i_stream, i_slot);
+    if ((i_e1 >> 3) == 0) {
+        if (i_e1 == TONE_E1) {
+            i_stream = TONE_STREAM;
+            i_slot = i_ts;
+        } else {
+            i_stream = i_e1 & 7;
+            i_slot = ((i_e1 & 7) << 5) | i_ts;
+        }       
+        //LOG_I("local card switch, i_e1 = %d, card_id=%d, i_stream=%d, i_slot=0x%x", i_e1, card_id, i_stream, i_slot);
         
     } else {
         i_stream = (i_e1 >> 3) + 5;
-        LOG_I("cross card switch, i_e1 = %d, card_id=%d, i_stream=%d, i_slot=0x%x", i_e1, card_id, i_stream, i_slot);
+        //LOG_I("cross card switch, i_e1 = %d, card_id=%d, i_stream=%d, i_slot=0x%x", i_e1, card_id, i_stream, i_slot);
+    }
+
+    if (o_e1 == TONE_E1) {
+        o_stream = MFC_STREAM;
+        o_slot = o_ts;
+    } else {
+        o_stream = o_e1;
+        o_slot = o_ts;
     }
 
     LOG_I("o_ts=0x%x, o_e1=0x%x, i_ts=0x%x, i_e1=0x%x", o_ts, o_e1, i_ts, i_e1);
+    LOG_D("o_stream = %d, o_slot = %d, i_stream = %d, i_slot = %d, card_id = %d", 
+        o_stream, o_slot, i_stream, i_slot, card_id);
     
     conn_value = (i_stream << 9) | (i_slot << 1);
-
-    o_slot = (o_e1 << 5) | o_ts;
-    
+  
     dev->cr &= 0xFC; // CONNECT MEMORY LOW read/write.
 
-    cml->sto_connect[0][o_slot] = conn_value;
+    cml->sto_connect[o_stream][o_slot] = conn_value;
 
-    LOG_D("Connect slot %x <-- %x\t[%p]=0x%x", o_slot, i_slot, &cml->sto_connect[0][o_slot], cml->sto_connect[0][o_slot]);
+    LOG_D("Connect slot %x <-- %x\t[%p]=0x%x", o_slot, i_slot, &cml->sto_connect[o_stream][o_slot], cml->sto_connect[o_stream][o_slot]);
 
     //ds26518_monitor_test(o_e1, o_ts);
 }
@@ -376,12 +392,12 @@ void read_zl50020_data_mem(u8_t stream_no, u8_t slot)
 {
     struct zl50020_cml *cml = ZL_CML;
     struct zl50020_dev *dev = ZL_DEV;
-    u8_t data[200] = {0};
+    u8_t data[300] = {0};
     u8_t dummy;
 
     LOG_I("Now print '%d' stream '%d' slot data memory!", stream_no, slot);
     dev->cr = 0x86; // data memory read.
-    for(int i = 0; i < 200; i++) {
+    for(int i = 0; i < 300; i++) {
         data[i] = cml->sto_connect[stream_no][slot];
         for (int j = 0; j < 20*16; j++) {
             dummy = dev->cr;
@@ -391,7 +407,7 @@ void read_zl50020_data_mem(u8_t stream_no, u8_t slot)
         }
     }
     dev->cr = 0x84;
-    LOG_HEX("", 16, data, 200);
+    LOG_HEX("", 16, data, 300);
 }
 
 void set_output_clock(uint16_t ocfcr, uint16_t ocfsr)
@@ -536,7 +552,7 @@ void print_prbs_value(u8_t stream_no, int stop_flag)
 
 void test_prbs(void)
 {
- 
+/* 
     enable_prbs_function(0);
     ds26518_monitor_test(0, 1);
     print_prbs_value(0, 0);
@@ -544,7 +560,7 @@ void test_prbs(void)
     print_prbs_value(0, 0);
     ds26518_monitor_test(0, 1);
     print_prbs_value(0, 0);
-   
+*/   
 }
 
 void m34116_mode(void)
@@ -632,6 +648,35 @@ void mfc_module_detect(void)
         LOG_E("MFC MODULE NOT INSTALLED!\n");
         ram_params.mfc_module_installed = 0;
     }
+}
+
+void mfc_t32_zl50020_test(u8_t test_value)
+{
+    /* t32负责放A1-A7， mfc负责解码，zl50020负责连接时隙 */
+    if (zl50020_inited == 0) {
+        zl50020_init();
+    }
+
+    if (ram_params.mfc_module_installed == 0) {
+        LOG_W("Not installed MFC Module, can't run the test!");
+        return;
+    }
+
+    LOG_I("Now MFC-TONE32-ZL50020 test is going on!");
+
+    for (int i = 0; i < 1; i++)
+    {
+        connect_slot(i, TONE_E1, test_value, TONE_E1);
+        HAL_Delay(10);
+        u8_t read_value = read_dtmf(i);
+        LOG_W("--write\tread");
+        LOG_W("--%x\t%x\t%x\t%x", test_value, read_value, read_dtmf(i), read_dtmf(i));
+        //LOG_I("read mfc code = %x, test_value=%x", read_value, test_value);
+        //if ((read_value & 0xF) != test_value) {
+        //    LOG_W("Test failed on slot '%d' !", i);
+        //}
+    }
+    //LOG_I("TEST PASS!");
 }
 
 u8_t get_card_id(void)

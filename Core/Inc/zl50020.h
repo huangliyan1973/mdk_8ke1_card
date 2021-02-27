@@ -42,10 +42,12 @@
 
 #define TONE_E1			7
 #define TONE_SILENT 	31
+#define CONF_E1		    6
+
 
 #define TONE_STREAM 	2
-#define CONF_STREAM 	3
-#define MFC_STREAM 		4
+#define CONF_STREAM 	4
+#define MFC_STREAM 		3
 
 typedef volatile uint16_t  vu16;
 
@@ -137,4 +139,7 @@ extern void read_zl50020_data_mem(u8_t stream_no, u8_t slot);
 extern void print_zl50020_cml_value(u16_t stream_no, u16_t slot);
 
 extern void print_zl50020(u8_t stream_no, u8_t slot);
+
+extern void mfc_t32_zl50020_test(u8_t test_value);
+
 #endif /* INC_ZL50020_H_ */

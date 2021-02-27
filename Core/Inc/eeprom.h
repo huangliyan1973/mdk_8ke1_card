@@ -64,7 +64,7 @@ typedef struct {
 
 typedef struct {
 	u8_t 	conf_grp;
-	u8_t 	first_abcd;
+	u8_t 	ls_out;
 	u8_t 	chk_times;
 	u8_t 	ls_in;
 	u8_t 	old_mfc_par;

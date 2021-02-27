@@ -23,7 +23,7 @@
 #include "ulog.h"
 
 static struct netconn *ss7_conn;
-static struct netconn *isdn_conn;
+//static struct netconn *isdn_conn;
 //static struct netconn *other_conn;
 
 extern u8_t card_id;
@@ -31,8 +31,31 @@ extern u8_t card_id;
 card_heart_t  hb_msg;
 mtp2_heart_t mtp2_heart_msg;
 
-void send_ss7_test_msg(void);
-void send_isdn_test_msg(void);
+//void send_ss7_test_msg(void);
+//void send_isdn_test_msg(void);
+static void send_mfc_num_to_msc(void);
+
+static char *get_other_msg_type(u8_t type)
+{
+    switch (type) {
+        case CON_TIME_SLOT:
+            return "Connect slot";
+        case CON_TONE:
+            return "Connect tone";
+        case CON_DTMF:
+            return "Connect Dtmf";
+        case CON_CONN_GRP:
+            return "Conference";
+        case CON_DISC_GRP:
+            return "Dismiss Con";
+        case CON_DEC_DTMF:
+            return "Decode Dtmf";
+        case CON_DEC_MFC:
+            return "Decode MFC";
+        default:
+            return "Unknown";
+    }
+}
 
 static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *src_addr)
 {
@@ -46,19 +69,31 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
     src_port = ot_msg->src_slot >> 5;
     src_slot = ot_msg->src_slot & 0x1F;
 
+    LOG_I("SN==>%s: dst_port  dst_slot  src_port  src_slt  tone_no  playtime", get_other_msg_type(ot_msg->m_head.msg_type));
+    LOG_I("\t\t\t%x\t%x\t%x\t%x\t%x\t%x", dst_port, dst_slot, src_port, src_slot,
+            ot_msg->tone_no, ot_msg->playtimes);
+    LOG_HEX("", 16, (u8_t *)p->payload, p->tot_len);
+
     switch (ot_msg->m_head.msg_type) {
         case CON_TIME_SLOT:
+            if ((slot_params[ot_msg->src_slot].connect_tone_flag & 0xf) > 0) {
+                slot_params[ot_msg->src_slot].connect_tone_flag = 0xf0;
+                slot_params[ot_msg->src_slot].ct_delay = 0;
+            }
             ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);
+            connect_slot(src_slot, src_port, dst_slot, dst_port);
+            #if 0
             if (dst_port == TONE_E1) {
                 connect_tone(src_slot, src_port, dst_slot, TONE_STREAM);
             } else {
                 connect_slot(src_slot, src_port, dst_slot, dst_port);
-                ds26518_mon_test2(src_port, src_slot);
+                //ds26518_mon_test2(src_port, src_slot);
             }
+            #endif
             break;
         case CON_TONE:
             ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);
-            connect_tone(src_slot, src_port, 0, TONE_STREAM);
+            //connect_tone(src_slot, src_port, 16, TONE_STREAM);
             toneno = e1_params.reason_to_tone[ot_msg->tone_no & 0x0F] & 0xF; /* tone0, tone1,...tone7 */
             slot_params[ot_msg->src_slot].connect_tone_flag = (toneno << 4) + 1;
             slot_params[ot_msg->src_slot].dmodule_ctone = ot_msg->dst_id; /* destination module when connect tone */
@@ -112,7 +147,7 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
                 }
             }
             slot_params[ot_msg->src_slot].port_to_group = IDLE;
-            connect_tone(src_slot, src_port, TONE_SILENT, TONE_STREAM);
+            connect_slot(src_slot, src_port, TONE_SILENT, TONE_STREAM);
             m34116_disconnect(ot_msg->src_slot);
             break;
         case CON_DEC_DTMF:
@@ -126,7 +161,13 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
             }
             break;
         case CON_DEC_MFC:
-            
+            if (ot_msg->playtimes == 1) {
+                /* query mfc number */
+                send_mfc_num_to_msc();
+            } else if (ot_msg->playtimes == 0) {
+                /* send line code */
+                out_tx_abcd(src_port, src_slot, ot_msg->tone_no);
+            }
             break;
         default:
             break;
@@ -270,8 +311,8 @@ static void ss7_netconn_thread(void *arg)
 
 void server_interface_init(void)
 {   
-    //hb_msg_init();
-    //period_10s_proc(NULL);
+    //init_r2_param();
+    init_mfc_slot();
     sys_thread_new("ss7_netconn", ss7_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
     start_period_proc();
     //sys_thread_new("isdn_netconn", isdn_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
@@ -291,7 +332,7 @@ void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len)
 
     struct ss7_msg *sig_msg = (struct ss7_msg *)netbuf_alloc(net_buf, tot_len);
     if (sig_msg == NULL) {
-        LOG_W("failed to alloc mem for ss7_msg\n");
+        LOG_W("failed to alloc memory for SS7 mssage.");
         return;
     }
 
@@ -312,16 +353,80 @@ void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len)
     netbuf_delete(net_buf);
 }
 
+static char * other_msg_type(struct other_msg *msg)
+{
+    switch (msg->tone_no)
+    {
+        case 0x3:
+            return "LS_IN";
+        case 0x4:
+            return "MFC_IN";
+        case 0x5:
+            return "MFC_NUMBER";
+        case 0x2:
+            return "DTMF_IN";
+        default:
+            return "UNKOWN";
+    }
+}
 /* len = msg->m_head.msu_len;
 */
 void send_other_msg(struct other_msg *msg, u8_t len)
 {
+    ip4_addr_t *dst_addr;
     
+    if (ss7_conn == NULL)
+        return;
+
+    struct netbuf *net_buf = netbuf_new();
+    u16_t tot_len = sizeof(struct other_msg) + len;
+
+    struct other_msg *send_msg = (struct other_msg *)netbuf_alloc(net_buf, tot_len);
+    if (send_msg == NULL) {
+        LOG_E("failed to alloc memory for control mssage");
+        return;
+    }
+
+    memcpy((void *)send_msg, (void *)msg, tot_len);
+    send_msg->m_head.msu_len = tot_len - 1;
+    dst_addr = plat_no ? &sn1 : &sn0;
+
+    if (netconn_sendto(ss7_conn, net_buf, dst_addr, OTHER_UDP_PORT) != ERR_OK) {
+        LOG_W("send control msg failed.\n");
+    }
+
+    LOG_HEX(other_msg_type(send_msg), 16, (u8_t *)send_msg, tot_len);
+    
+    netbuf_delete(net_buf);
 }
 
 void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len)
 {
+    ip4_addr_t *dst_addr;
     
+    if (ss7_conn == NULL)
+        return;
+
+    struct netbuf *net_buf = netbuf_new();
+    u16_t tot_len = sizeof(struct server_msg) + len - 2;
+
+    struct server_msg *isdn_msg = (struct server_msg *)netbuf_alloc(net_buf, tot_len);
+    if (isdn_msg == NULL) {
+        LOG_E("failed to alloc memory for ISDN mssage");
+        return;
+    }
+
+    isdn_msg->e1_no = link_no + (card_id << 3);
+    isdn_msg->msg_len = len;
+
+    memcpy((void *)&isdn_msg->sio, (void *)buf, len);
+    dst_addr = plat_no ? &sn1 : &sn0;
+
+    if (netconn_sendto(ss7_conn, net_buf, dst_addr, ISDN_UDP_PORT) != ERR_OK) {
+        LOG_W("send ISDN msg failed.\n");
+    }
+
+    netbuf_delete(net_buf);
 }
 
 void send_lsin_to_msc(u8_t e1_no)
@@ -343,7 +448,7 @@ void send_lsin_to_msc(u8_t e1_no)
     send_other_msg((struct other_msg *)&lsin_msg, 32);
 }
 
-void send_mfc_num_to_msc(void)
+static void send_mfc_num_to_msc(void)
 {
     struct msc_msg mfc_msg;
 
@@ -534,18 +639,24 @@ void ls_scan(int e1_no)
         return;
     }
 
-    u32_t change = check_rx_change(e1_no);
-    if (change == 0) {
-        return;
-    }
+    int changed = 0;
+    u8_t ls_in[32];
+    read_rx_abcd(e1_no, ls_in);
 
-    for (u8_t i = 1; i < 32; i++) {
-        if ((change >> i) & 1) {
-            slot_params[(e1_no << 5) + i].ls_in = read_rx_abcd(e1_no, i);
+    for (int i = 1; i < MAX_E1_TIMESLOTS; i++) {
+        if ((i != 16) && (slot_params[(e1_no << 5) + i].ls_in != ls_in[i])) {
+            LOG_W("E1 '%d' slot '%d' ls_in %x <-- %x", 
+                e1_no, i, ls_in[i], slot_params[(e1_no << 5) + i].ls_in);
+
+            slot_params[(e1_no << 5) + i].ls_in = ls_in[i];
+            changed = 1;
         }
     }
 
-    send_lsin_to_msc(e1_no);
+    if (changed) {
+        //LOG_HEX("rev_abcd", 16, ls_in, 32);
+        send_lsin_to_msc(e1_no);
+    }
 }
 
 void mfc_scan(void)
@@ -560,6 +671,10 @@ void mfc_scan(void)
     for (u8_t i = 0; i < 32; i++) {
         slot_params[start_pos + i].old_mfc_par = read_dtmf(i);
         if (slot_params[start_pos + i].mfc_value != slot_params[start_pos + i].old_mfc_par) {
+
+            LOG_D("slot '%d' receive new mfc code: %x -- > %x", i, slot_params[start_pos + i].mfc_value,
+                slot_params[start_pos + i].old_mfc_par);
+
             slot_params[start_pos + i].mfc_value = slot_params[start_pos + i].old_mfc_par;
             change_flag = 1;
         }
@@ -684,7 +799,7 @@ void update_e1_l1_status(void)
         //ram_params.e1_l1_alarm &= ~(read_liu_status(i) << i)
     }
 
-    ram_params.e1_l1_alarm = l1_status;
+    ram_params.e1_l1_alarm = l1_status & (~(ram_params.conf_module_installed << 1));
 
     if (l1_st != l1_status) {
         LOG_W("card l1_lararm = %x, l1_status = %x", ram_params.e1_l1_alarm, l1_status);
@@ -702,7 +817,7 @@ void update_e1_l2_status(void)
         l2_status |= (read_l2_status(i) << i);
     }
 
-    ram_params.e1_l2_alarm = l2_status;
+    ram_params.e1_l2_alarm = l2_status & (~(ram_params.conf_module_installed << 1));
 
     if (l2_st != l2_status) {
         LOG_W("card l2_lararm = %x, l2_status = %x", ram_params.e1_l2_alarm, l2_status);
@@ -825,7 +940,7 @@ void link_in_service(int e1_no)
     mtp2_heart_msg.is_NT = e1_params.isdn_port_type[card_id & 0x0f];
     mtp2_heart_msg.mtp2_mode = e1_params.mtp2_error_check[card_id & 0x0f];
 
-    LOG_D("Send link in service msg:");
+    LOG_I("Link '%d' is in service:", e1_no);
     LOG_D("link '%d' l1_status = %x", e1_no, mtp2_heart_msg.l1_status);
     LOG_D("link '%d' l2_status=%d", e1_no, l2_alarm_to_state(e1_no));
     //LOG_D("e1_port type = %X", e1_params.e1_port_type[card_id & 0x0f]);
@@ -888,7 +1003,8 @@ void period_10s_proc(void *arg)
     }
 
     send_mtp2_trap_msg();
-    //LOG_I("perioad 10s timeout");
+
+    //ds26518_frame_status(0);
 
     sched_timeout(10000, period_10s_proc, NULL);
 }
@@ -915,9 +1031,26 @@ void update_e1_enable(u8_t new_value)
         if (!(old_value & mask) && (new_value & mask)) {
             e1_port_init(i);
         } else if ((old_value & mask) && !(new_value & mask)) {
-            //deinit e1_port;
+            e1_port_init(i);
         }
     }
 
     e1_params.e1_enable[card_id] = new_value;
+}
+
+void init_r2_param(void)
+{
+    for (int i = 0; i < 256; i++) {
+        slot_params[i].chk_times = 0;
+        slot_params[i].ls_in = slot_params[i].ls_out = 0;
+        slot_params[i].old_mfc_par = 0;
+        slot_params[i].mfc_value = 0;
+    }
+}
+
+void init_mfc_slot(void)
+{
+    for(int i = 0; i < MAX_E1_TIMESLOTS; i++) {
+        connect_slot(i, TONE_E1, 0, TONE_E1);
+    }
 }

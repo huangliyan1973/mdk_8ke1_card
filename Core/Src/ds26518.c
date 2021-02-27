@@ -13,6 +13,7 @@
 #include "usart.h"
 #include "zl50020.h"
 #include "mtp.h"
+#include "eeprom.h"
 #include "lwip/sys.h"
 #include "lwip/def.h"
 
@@ -111,54 +112,61 @@ static void ds26518_tcice_init(int e1_no)
 	f->tcice[3] = 0xff;
 }
 
-/* slot: 0 - 31 ; e1_no: 0 - 7 */
-u8_t read_rx_abcd(int e1_no, u8_t slot)
+static void ds25618_ts_init(int e1_no)
 {
-	if (slot == 0 || slot == 0x10) {
-		return 0;
-	}
-
 	FRAMER *f = ds26518_framer(e1_no);
-	
-	u8_t value = f->rs[(slot & 0x10)];
-	if (slot & 0x10) {
-        LOG_D("'%d' E1 '%d' slot got line code is %2x", e1_no, slot, value & 0x0F);
-		return  (value & 0x0F);
+
+	f->ts[0] = 0x0b; // 时隙0的高四位必须为0， 用于复帧同步信号(CAS MF)
+
+	memset((void *)&f->ts[1], 0xBB, 15); // 0b 表示线路空闲。
+
+	int base = e1_no << 5;
+
+	slot_params[base].ls_out = 0;
+	slot_params[base].ls_in = 0;
+
+	for (int i = 1; i < MAX_E1_TIMESLOTS; i++) {
+		slot_params[base + i].ls_out = 0xb;
+		slot_params[base + i].ls_in = 0;
 	}
-    LOG_D("'%d' E1 '%d' slot got line code is %2x", e1_no, slot, value >> 4);
-	return (value >> 4);
+}
+
+void read_rx_abcd(int e1_no, u8_t *rv_abcd)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	u8_t value;
+	
+	for (int i = 1; i < MAX_E1_TIMESLOTS / 2; i++) {
+		value = f->rs[i];
+		*(rv_abcd + i) = ((value & 0xf0) >> 4);
+		*(rv_abcd + i + 16) = (value & 0x0f);
+	}
 }
 
 void out_tx_abcd(int e1_no, u8_t slot, u8_t value)
 {
 	FRAMER *f = ds26518_framer(e1_no);
 
-	u8_t old_value = f->ts[slot & 0x10];
+	//u8_t old_value = f->ts[slot & 0x10];
 
 	if (slot == 0 || slot == 0x10) {
 		return;
 	}
+	u8_t tot_index = (e1_no << 5) + slot;
+	slot_params[tot_index].ls_out = value & 0xf;
 
-	if (slot & 0x10) {
-		f->ts[slot & 0x10] = (old_value & 0xF0) | (value & 0x0F);
+	u8_t index = (slot > 15) ? (slot - 16) : slot;
+	u8_t bits = value & 0xf;
+	if (slot > 15) {
+		bits = (slot_params[tot_index - 16].ls_out << 4) | bits;
 	} else {
-		f->ts[slot & 0x10] = (old_value & 0x0F) | (value << 4);
+		bits = (slot_params[tot_index + 16].ls_out) | (bits << 4);
 	}
 
-	LOG_D("'%d' E1 '%d' slot SET line code is %02x, ts value=%02x", 
-        e1_no, slot, value, f->ts[slot & 0x10]);
-}
+	f->ts[index] = bits;
 
-u32_t check_rx_change(int e1_no)
-{
-	u32_t temp;
-	FRAMER *f = ds26518_framer(e1_no);
-
-	temp = PP_HTONL((u32_t)f->rss[0]);
-	if (temp) {
-	    LOG_D("RX_ABCD change value = %04X", temp);
-    }
-	return temp;
+	LOG_I("'%d' E1 '%d' slot SET line code is %02x, ts value=%02x", 
+        e1_no, slot, value, f->ts[index]);
 }
 
 u8_t read_liu_status(int e1_no)
@@ -191,39 +199,22 @@ void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 {
 	FRAMER *f = ds26518_framer(e1_no);
 
-#if 0
 	if (slot == 0 || slot == 16) {
 		return;
 	}
-
+	
 	u8_t index = (u8_t)(slot >> 3);
 	u8_t bit_mask = (1 << (u8_t)(slot & 0x7));
-	//u8_t *tcice = &(f->tcice[index]);
 
 	if (active == VOICE_ACTIVE) {
 		f->tcice[index] &= (~bit_mask);
 	} else {
 		f->tcice[index] |= bit_mask;
 	}
-#endif
-	f->tcice[0] = f->tcice[1] = f->tcice[2] = f->tcice[3] = 0;
-	f->rcice[0] = f->rcice[1] = f->rcice[2] = f->rcice[3] = 0;
 
 	LOG_D("'%d' E1 '%d' slot set %s , tcice=%02x %02x %02x %02x",
         e1_no, slot, active == VOICE_ACTIVE ? "Enable":"Disable", 
         f->tcice[0], f->tcice[1], f->tcice[2], f->tcice[3]);
-
-#if 0
-	uint32_t *val = (uint32_t *)&(f->tcice[0]);
-	uint32_t mask = (uint32_t)(1L << (slot & 0x1F));
-
-	if (active == VOICE_ACTIVE) {
-		*val = (*val) & (~mask);
-	} else {
-		*val = (*val) | mask;
-	}
-	CARD_DEBUGF(MTP_DEBUG, ("tcice value = %04X\n", *val));
-#endif
 }
 
 
@@ -260,19 +251,19 @@ void set_ds26518_master_clock(enum BACKPLANE_REFERENCE back_ref)
 	set_ds26518_backplane_refclock(back_ref);
 	set_ds26518_tclk_src(TCLK_PIN);
 
-	f->gtcr3 = 0x3;
-	f->gtccr3 = GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL ;
+	//f->gtcr3 = 0x3;
+	//f->gtccr3 = GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL ;
 }
 
 void set_ds26518_slave_clock(void)
 {
 	FRAMER *f = ds26518_global_framer();
 
-	set_ds26518_backplane_refclock(REFCLKIO); //???
+	set_ds26518_backplane_refclock(REFCLKIO); 
 	set_ds26518_tclk_src(TCLK_PIN);
 
-	f->gtcr3 = 0x1;
-	f->gtccr3 = 0;
+	//f->gtcr3 = 0x1;
+	//f->gtccr3 = 0;
 }
 
 void set_ds26518_signal_slot(int e1_no, UC signal_slot)
@@ -512,10 +503,12 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 * Bit 0 = 0, CRC-4 disabled.
 	 *       = 1, CRC-4 enabled.
 	 */
-	f->tcr1 = TCR1_TSIS | TCR1_THDB3;
+	//f->tcr1 = TCR1_TSIS | TCR1_THDB3;
+	f->tcr1 = TCR1_TSIS ;
 	if (sig_type == CAS_TYPE) {
 		f->tcr1 |= TCR1_T16S;
-	}
+		ds25618_ts_init(e1_no);
+	} 
 
 	/* TIBOC
 	 * Bit 4 = 1, Frame Interleave.
@@ -549,8 +542,7 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	/* Transmit Elastic store is enabled */
 	/* disable transmit elastic store 2021.2.18*/
 	f->tescr = TESCR_TESE;
-	//f->tescr = 0;
-
+	
 	/* TXPC
 	 * Bit 7 = 0 ,Transmit HDLC-256 Mode Select assigned to time slots
 	 * Bit 6 = 0, Transmit HDLC-256 is not active.
@@ -563,15 +555,22 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	memset((void *)f->thcs, 0, 4);
 
 	/* Software-Signaling Insertion Enable Registers 1 to 4 */
-	memset((void *)f->ssie, 0, 4);
-
+    #if 0
+	if (sig_type == CAS_TYPE) {
+		f->ssie[0] = 0xFE;
+		f->ssie[1] = 0xFF;
+		f->ssie[2] = 0xFE;
+		f->ssie[3] = 0xFF;
+	} else {
+		memset((void *)f->ssie, 0, 4);
+	}
+    #endif
+    
 	/* The Transmit Idle Code Definition Registers */
 	memset((void *)f->tidr, 0x55, 32);
 
 	/* The Transmit Channel Idle Code Enable registers */
 	ds26518_tcice_init(e1_no);
-
-	//f->ts[0] = 0xB; // 0 slot send bit.
 
 	f->tsacr = 0x0;
 
@@ -589,7 +588,8 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 * Bit 1 = 0, Auto resync enabled.
 	 */
 	if (sig_type == CAS_TYPE) {
-		f->rcr1 = RCR1_RHDB3 | RCR1_FRC;
+		//f->rcr1 = RCR1_RHDB3 | RCR1_FRC;
+		f->rcr1 = RCR1_FRC;
 	} else {
 		f->rcr1 = RCR1_RSIGM | RCR1_RHDB3 | RCR1_FRC;
 	}
@@ -660,7 +660,7 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	HAL_Delay(1);
 	ds26518_mon_test2(e1_no, 1);
 #endif
-	LOG_D("E1 port '%d' init finished!", e1_no);
+LOG_D("E1 port '%d' init finished ON %s TYPE!", e1_no, sig_type == CCS_TYPE ? "CCS_TYPE" : "CAS_TYPE");
 
 }
 
@@ -929,7 +929,7 @@ void ds26518_mon_test2(int e1_no, int slot)
 	ds26518_monitor_tx_slot(e1_no, slot);
     ds26518_monitor_rx_slot(e1_no, slot);
 
-	LOG_I("Now print E1 '%d' slot '%d' tx, rx data", e1_no, slot);
+	LOG_I("Now in monitor test2, print E1 '%d' slot '%d' tx, rx data", e1_no, slot);
     print_zl50020_cml_value(0, slot);
     for(int i = 0; i < 10; i++){
         LOG_D("tx_data = %x, rx_data = %x", f->tdsom, f->rdsom);
@@ -938,6 +938,28 @@ void ds26518_mon_test2(int e1_no, int slot)
 	read_zl50020_data_mem(0, slot);
 }
 
+void ds26518_display_rx_data(int e1_no, int slot)
+{
+    FRAMER *f = ds26518_framer(e1_no);
+    //u8_t tx_data[300] = {0};
+    u8_t rx_data[300] = {0};
+    u8_t dummy;
+
+    LOG_I("Now print '%d' e1 '%d' slot rx memory!", e1_no, slot);
+    
+    for(int i = 0; i < 300; i++) {
+        //tx_data[i] = f->tdsom;
+        rx_data[i] = f->rdsom;
+        for (int j = 0; j < 20*16; j++) {
+            dummy = f->tdsom;
+            if (dummy != 0x86) {
+                continue;
+            }
+        }
+    }
+    //LOG_HEX("tx-data", 16, tx_data, 300);
+    LOG_HEX("rx-data", 16, rx_data, 300);
+}
 void ds26518_monitor_test(int e1_no, int slot)
 {
     FRAMER *f = ds26518_framer(e1_no);
@@ -946,37 +968,21 @@ void ds26518_monitor_test(int e1_no, int slot)
     ds26518_monitor_rx_slot(e1_no, slot);
 	ds26518_e1_slot_enable(e1_no,slot,VOICE_ACTIVE);
 
-	//zl50020_bitDelay(0, 7);
-	//zl50020_bitAdvancement(0,1);
-	//zl50020_frac_bit_adv(0);
-/*
-    if (slot < 8) {
-        f->rcice[0] = 1 << slot;
-    } else if (slot < 16) {
-        f->rcice[1] = 1 << (slot - 8);
-    } else if (slot < 24) {
-        f->rcice[2] = 1 << (slot - 16);
-    } else {
-        f->rcice[3] = 1 << (slot - 24);
-    }
-	f->ridr[slot] = 0x15;
-*/
-	//f->tcice[0] = 0xfe;
-	//f->tidr[slot] = 0x22;
-
-	//read_zl50020_data_mem(0, slot);
-	connect_tone(slot, e1_no, 0, TONE_STREAM);
-
+	//connect_tone(slot, e1_no, 0, TONE_STREAM);
+    connect_slot(slot, e1_no, 0, TONE_E1);
 	
     //set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
     HAL_Delay(4);
-    LOG_I("Now print E1 '%d' slot '%d' tx, rx data", e1_no, slot);
+    LOG_I("Now in ds26518 monitor test, print E1 '%d' slot '%d' tx, rx data", e1_no, slot);
     print_zl50020_cml_value(0, slot);
-    for(int i = 0; i < 10; i++){
-        LOG_D("tx_data = %x, rx_data = %x", f->tdsom, f->rdsom);
-    }
+    
+    set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
+    
+    ds26518_display_rx_data(e1_no, slot);
     
 	read_zl50020_data_mem(0, slot);
+    
+    set_ds26518_loopback(e1_no, NO_LP);
 }
 
 void ds26518_BERT_error_insert_rate(int e1_no, int err_rate)
@@ -1044,6 +1050,107 @@ void ds26518_bert_report(int e1_no)
     LOG_W("BERT Latched Status = %X/%X", ebert->blsr1, ebert->blsr2);
     LOG_W("BERT Bit Counter = %d", (u32_t)bert->bbc[0] | (u32_t)bert->bbc[1] << 8 | (u32_t)bert->bbc[2] << 16 | (u32_t)bert->bbc[3] << 24);
     LOG_W("BERT Bit Error = %d", (u32_t)bert->bec[0] | (u32_t)bert->bec[1] << 8 | (u32_t)bert->bec[2] << 16);
+}
+
+void ds26518_bert_test(int e1_no, int slot, int system_direction)
+{
+	FRAMER *f = ds26518_framer(e1_no & 7);
+    BERT *bert = ds26518_bert(e1_no & 7);
+    EXTBERT *ebert = ds26518_exbert(e1_no & 7);
+
+	f->txpc = TXPC_TBPEN | (system_direction == 1 ? TXPC_TBPDIR : 0);
+	f->rxpc = RXPC_RBPEN | (system_direction == 1 ? RXPC_RPPDIR : 0);
+
+	int index = (slot & 0x1f) >> 3;
+	int bit = (slot & 7);
+
+	memset((void *)f->tbpcs, 0, 4);
+	f->tbpcs[index] = 1 << bit;
+
+	memset((void *)f->rbpcs, 0, 4);
+	f->rbpcs[index] = 1 << bit;
+
+	/* Alternating Word Pattern  = 5*/
+	bert->bc1 = BC1_PS(5);
+	bert->brp[0] = bert->brp[1] = 0;
+	bert->brp[2] = bert->brp[3] = 0x7e;
+	bert->bawc = 100;
+
+	/* Connect slot */
+	if (system_direction == 1) {
+		connect_slot(slot, e1_no, slot, e1_no);
+	} else {
+		set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
+	}
+	
+	/*Load pattern */
+	bert->bc1 |= (BC1_TC | BC1_LC);
+
+	HAL_Delay(2);
+
+	bert->bc1 &= ~(BC1_LC);
+	bert->bc1 |= BC1_LC;
+
+	HAL_Delay(2);
+
+	u32_t bit_counts = ((u32_t)bert->bbc[3] << 24) | ((u32_t)bert->bbc[2] << 16) | ((u32_t)bert->bbc[1] << 8) | bert->bbc[0];
+	u32_t bit_err_counts = ((u32_t)bert->bec[2] << 16) | ((u32_t)bert->bec[1] << 8) | bert->bec[0];
+
+	u8_t real_status = ebert->brsr;
+	u8_t latch_status1 = ebert->blsr1;
+	u8_t latch_status2 = ebert->blsr2;
+
+	ebert->blsr1 = latch_status1;
+	ebert->blsr2 = latch_status2;
+
+	LOG_I("--------------E1 %d Slot %d BERT TEST RESULT-----------------", e1_no, slot);
+	LOG_I("Bit counts\tBit ERROR counts");
+	LOG_I("%d\t%d", bit_counts, bit_err_counts);
+	LOG_I("Real_status\tla status1\tla status2");
+	LOG_I("%02x\t%02x\t%02x", real_status, latch_status1, latch_status2);
+	LOG_I("---------------END REPROT-------------------------------------");
+}
+
+char *frame_status(u8_t status)
+{
+	if (status & RRTS7_CRC4SA) {
+		return "CRC4 Multiframer";
+	} else if (status & RRTS7_CASSA) {
+		return "CAS Multiframer";
+	} else if (status & RRTS7_FASSA) {
+		return "Framer";
+	} else {
+		return "NOT Aligned!";
+	}
+}
+
+void ds26518_frame_status(int e1_no)
+{
+    FRAMER *f = ds26518_framer(e1_no);
+
+    LOG_I("DS2658 e1 '%d' frame status = %x:'%s'", e1_no,f->rfdl_rrts7, frame_status(f->rfdl_rrts7));
+
+
+	//out_tx_abcd(0, 17, 7);
+	//HAL_Delay(2);
+
+
+	u8_t read_abcd[16];
+	for (int i = 0; i < 16; i++) {
+		read_abcd[i] = f->rs[i];
+	}
+	LOG_HEX("rx-abcd", 16, read_abcd, 16);
+
+#if 0
+	ds26518_monitor_tx_slot(e1_no, 16);
+    ds26518_monitor_rx_slot(e1_no, 16);
+
+    LOG_I("Now print E1 '%d' slot '%d' tx, rx data", e1_no, 16);
+    
+    for(int i = 0; i < 20; i++){
+        LOG_D("tx_data = %x, rx_data = %x", f->tdsom, f->rdsom);
+    }
+#endif
 }
 
 #if 0
