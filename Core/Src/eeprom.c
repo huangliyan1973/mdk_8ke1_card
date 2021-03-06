@@ -157,7 +157,7 @@ void init_eeprom(void)
         e1_params.version = E1_CARD_VERSION;
         
         for( int i = 0; i < E1_CARDS; i++) {
-            e1_params.e1_enable[i] = 0x01;
+            e1_params.e1_enable[i] = 0xf;
             e1_params.e1_l2_alarm_enable[i] = 0xff;
             e1_params.e1_port_type[i] = SS7_PORT;
             e1_params.isdn_port_type[i] = PRI_CPE;
@@ -166,7 +166,7 @@ void init_eeprom(void)
             e1_params.no1_enable[i] = NO1_DISABLE;
         }
 
-        //e1_params.no1_enable[0] = 1;
+        e1_params.no1_enable[0] = 2;
 
         //init_tone_cadence();        
 

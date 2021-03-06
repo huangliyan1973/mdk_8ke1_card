@@ -60,7 +60,7 @@ void zl50020_connect_memory_init(u8_t stream_no)
     }
     #endif
     u16_t *cml = (u16_t *)CML_STO_ADDR(stream_no);
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < 32; i++) {
         *(cml + i) = (TONE_STREAM << 9);
     }
 }
@@ -107,37 +107,23 @@ void zl50020_init(void)
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET);
 
     //Set ISR for STI stream clk
-#ifdef IBO_ENABLE
-    dev->sicr[0] = 0x4; // 16.384M for DS26518
-#else 
-    dev->sicr[0] = 0x1;
-#endif
+    for(int i = 0; i < E1_PORT_PER_CARD; i++)
+    {
+        dev->sicr[i] = 0x1; //2.048M for E1 port;
+        dev->socr[i] = 0x1;
+    }
+    
+    dev->sicr[8] = dev->socr[8] = 0x1; // 2.048M for TONE32 Module.
+    dev->sicr[9] = dev->socr[9] = 0x1; // 2.048M for MFC Module.
+    dev->sicr[10] = dev->socr[10] = 0x1; // 2.048M for CONF Module.
 
-    dev->sicr[1] = 0x1; // 2.048M for I2S
-    dev->sicr[2] = 0x1; // 2.048M for TONE32 Module.
-    dev->sicr[3] = 0x1; // 2.048M for CONF Module.
-    dev->sicr[4] = 0x1; // 2.048M for MFC Module.
-
-    dev->sicr[5] = dev->sicr[6] = dev->sicr[7] = dev->sicr[8] = 0x4; //16.384M for OTHER 8KE1 Card.
-
-    //Set OSR for STO stream clk
-#ifdef IBO_ENABLE
-    dev->socr[0] = 0x4;
-#else
-    dev->socr[0] = 0x1;
-#endif
-    dev->socr[1] = 0x1;
-    dev->socr[2] = 0x1;
-    dev->socr[3] = 0x1;
-
-    dev->socr[5] = dev->socr[6] = dev->socr[7] = dev->socr[8] = 0x4;
-
+ 
     LOG_D("ZL500020 REGISTER:");
     LOG_D("CR = %X, IMS=%x, SRR=%X, OCFCR=%X",dev->cr, dev->ims, dev->srr, dev->ocfcr);
-    LOG_D("SICR1 = %X, SOCR1=%X, SICR5=%X, SOCR5=%X",
-        dev->sicr[0], dev->socr[0], dev->sicr[5], dev->socr[5]);
+    LOG_D("SICR1 = %X, SOCR1=%X, SICR8=%X, SOCR8=%X",
+        dev->sicr[0], dev->socr[0], dev->sicr[8], dev->socr[8]);
     
-    for (int i = 0; i < 9; i++){
+    for (int i = 0; i < 11; i++){
         zl50020_connect_memory_init(i);
     }
 
@@ -181,13 +167,13 @@ void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
             i_slot = i_ts;
         } else {
             i_stream = i_e1 & 7;
-            i_slot = ((i_e1 & 7) << 5) | i_ts;
+            i_slot = i_ts;
         }       
         //LOG_I("local card switch, i_e1 = %d, card_id=%d, i_stream=%d, i_slot=0x%x", i_e1, card_id, i_stream, i_slot);
         
     } else {
-        i_stream = (i_e1 >> 3) + 5;
-        //LOG_I("cross card switch, i_e1 = %d, card_id=%d, i_stream=%d, i_slot=0x%x", i_e1, card_id, i_stream, i_slot);
+        i_stream = (i_e1 >> 3) + 11;
+        i_slot = i_ts;
     }
 
     if (o_e1 == TONE_E1) {
@@ -198,9 +184,8 @@ void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
         o_slot = o_ts;
     }
 
-    LOG_I("o_ts=0x%x, o_e1=0x%x, i_ts=0x%x, i_e1=0x%x", o_ts, o_e1, i_ts, i_e1);
-    LOG_D("o_stream = %d, o_slot = %d, i_stream = %d, i_slot = %d, card_id = %d", 
-        o_stream, o_slot, i_stream, i_slot, card_id);
+    //LOG_D("o_ts --- o_e1--- i_ts--- i_e1 === o_st === i_st");
+    //LOG_D("0x%x\t0x%x\t0x%x\t0x%x\t%d\t%d", o_ts, o_e1, i_ts, i_e1,o_stream, i_stream);
     
     conn_value = (i_stream << 9) | (i_slot << 1);
   
@@ -208,38 +193,10 @@ void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
 
     cml->sto_connect[o_stream][o_slot] = conn_value;
 
-    LOG_D("Connect slot %x <-- %x\t[%p]=0x%x", o_slot, i_slot, &cml->sto_connect[o_stream][o_slot], cml->sto_connect[o_stream][o_slot]);
+    LOG_I("Connect slot 0x%x[%d] <-- 0x%x[%d]\t[%p]=0x%x", o_slot, o_stream, i_slot, i_stream,
+        &cml->sto_connect[o_stream][o_slot], cml->sto_connect[o_stream][o_slot]);
 
-    //ds26518_monitor_test(o_e1, o_ts);
 }
-
-#if 0
-void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
-{
-    struct zl50020_dev *dev = ZL_DEV;
-    //struct zl50020_cml *cml = ZL_CML;
-
-    uint16_t o_slot = (o_e1 << 5) | o_ts;
-
-    uint16_t i_stream = (i_e1 >> 3) + 5;
-    uint16_t i_slot = ((i_e1 & 7) << 5) | i_ts;
-
-    uint16_t *pcml = (uint16_t *)CML_STO_ADDR(0);
-
-    dev->cr &= 0xFC; // CONNECT MEMORY LOW read/write.
-
-    /* i_e1 < 8: sti5, i_e1 < 16: sti6, i_e1 < 24, sti7, i_e1 < 32, sti8 */
-    LOG_I("o_ts: %x, o_e1=%x, i_ts=%x, i_e1=%x", o_ts, o_e1, i_ts, i_e1);
-
-    u16_t value = (i_stream << 9) | (i_slot << 1);
-    pcml[o_slot] = value;
-
-    LOG_I("pcm memory addr: %p, value=%04x", pcml+o_slot, value);
-
-    LOG_I("connect slot[stream] %04x[%02x] <-- %04x[%02x], CML addr:%p value:%04x",
-        o_slot, 0, i_slot, i_stream, &pcml[o_slot], pcml[o_slot]);
-}
-#endif
 
 /* i_stream possible value:
 TONE_STREAM,
@@ -250,16 +207,14 @@ void connect_tone(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_stream
 {
     struct zl50020_dev *dev = ZL_DEV;
     struct zl50020_cml *cml = ZL_CML;
-    //uint16_t *pcml = (uint16_t *)(ZL50020_BASE + CONN_MEM_OFFSET);
-    uint16_t o_slot = (o_e1 << 5) | o_ts;
-
-    dev->cr &= 0xFC; // CONNECT MEMORY LOW read/write.
+    
+    dev->cr &= 0xFC; 
 
     //pcml[o_slot] = (i_stream << 9) | (i_ts << 1); /* BIT 8 - BIT 1 */
-    cml->sto_connect[0][o_slot] = (i_stream << 9) | (i_ts << 1);
+    cml->sto_connect[o_e1][o_ts] = (i_stream << 9) | (i_ts << 1);
 
-    LOG_I("connect tone %04x <-- %04x/%d, connect_memory[%d]=%04x",
-        o_slot, i_ts, i_stream, o_slot, cml->sto_connect[0][o_slot]);
+    LOG_I("connect tone 0x%x[%d] <-- 0x%x[%d]",
+        o_ts, o_e1, i_ts, i_stream);
 }
 
 void zl50020_bitDelay(u8_t stream_no, u8_t bit_delay)
@@ -295,14 +250,6 @@ void print_zl50020_register(void)
                                                         i, *(reg + 0x200 + i),
                                                         i, *(reg + 0x120 + i));
     }
-#if 0
-    for (int i = 0; i < 32; i++) {
-        LOG_W("BER Start reg%d = %x, Length%d = %x, Control%d = %x, Err reg%d = %x", i, *(reg + 0x300 + i),
-                                                                                    i, *(reg + 0x320 + i),
-                                                                                    i, *(reg + 0x340 + i),
-                                                                                    i, *(reg + 0x360 + i));
-    }
-#endif
 }
 
 void print_zl50020_CML(u16_t stream_no)
@@ -667,14 +614,10 @@ void mfc_t32_zl50020_test(u8_t test_value)
     for (int i = 0; i < 1; i++)
     {
         connect_slot(i, TONE_E1, test_value, TONE_E1);
-        HAL_Delay(10);
+        HAL_Delay(100);
         u8_t read_value = read_dtmf(i);
         LOG_W("--write\tread");
         LOG_W("--%x\t%x\t%x\t%x", test_value, read_value, read_dtmf(i), read_dtmf(i));
-        //LOG_I("read mfc code = %x, test_value=%x", read_value, test_value);
-        //if ((read_value & 0xF) != test_value) {
-        //    LOG_W("Test failed on slot '%d' !", i);
-        //}
     }
     //LOG_I("TEST PASS!");
 }

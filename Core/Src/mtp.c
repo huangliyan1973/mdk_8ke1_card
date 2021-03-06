@@ -165,7 +165,7 @@ static void mtp2_cleanup(mtp2_t *m)
     sched_untimeout(mtp2_t7_timeout, m);
     sched_untimeout(mtp2_t17_timeout, m);
 
-    LOG_D("mtp2 cleanup on link '%d'", m->e1_no);
+    //LOG_D("mtp2 cleanup on link '%d'", m->e1_no);
 }
 
 /* Called on link errors that occur during initial alignment (before the link
@@ -408,7 +408,7 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
             m->state = MTP2_ALIGNED;
         
         } else if (m->state == MTP2_READY) {
-            
+            LOG_W("Got status indication 'O' while MTP2_READY on link %d. ", m->e1_no);
             abort_initial_alignment(m);
         
         } else if (m->state == MTP2_INSERVICE) {
@@ -462,15 +462,12 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
 
     case 3:                   /* Status indication 'OS' */
         if (m->state == MTP2_ALIGNED || m->state == MTP2_PROVING) {
-            //ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
-            //link_outof_service(m->e1_no, LKALARM_POC);
+            LOG_W("Got status indication 'OS' while MTP2_PROVING or MTP2_ALIGNED on link '%d'.", m->e1_no);
             abort_initial_alignment(m);
         
         } else if (m->state == MTP2_READY) {
             
             LOG_W("Got status indication 'OS' while READY on link '%d'.", m->e1_no);
-            //ram_params.e1_l2_alarm &= (~(1 << m->e1_no));
-            //link_outof_service(m->e1_no, LKALARM_WORKING);
             mtp3_link_fail(m, 1);
         
         } else if(m->state == MTP2_INSERVICE) {
@@ -748,6 +745,9 @@ void e1_port_init(int e1_no)
     mtp2_t *m = &mtp2_state[e1_no];
     memset((void *)m, 0, sizeof(mtp2_t));
 
+    if (e1_no == 1) {
+        LOG_W("Got card_id = %d, e1 '%d' no1_enable = %x, '>>1'=%x", card_id, e1_no, e1_params.no1_enable[0], e1_params.no1_enable[0]>>1);
+    }
     if (!CHN_NO1_PORT_ENABLE(e1_no)) {       
         prepare_init_link(e1_no);
         if (SS7_PORT_ENABLE(e1_no)) { /* ss7 */
@@ -842,13 +842,13 @@ static void mtp2_thread(void *arg)
                 (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_TEI_UNASSIGNED)) {
                     continue;
                 }
-#if 0
+/*
             if (check_liu_status(i)) {
                 continue;
             }
-#endif
+*/
             ds26518_tx_rx_poll(i);
-            //}
+
        }
 
     }
@@ -906,6 +906,7 @@ void mtp2_command(u8_t e1_no, u8_t command)
                     LOG_W("Active link'%d'", e1_no);
                     if (m->init_down) {
                         if (m->protocal == SS7_PROTO_TYPE) {
+                            enable_e1_transmit(e1_no);
                             start_initial_alignment(m, "usually start!");
                         } else if (m->protocal == PRI_PROTO_TYPE) {
 
@@ -921,6 +922,7 @@ void mtp2_command(u8_t e1_no, u8_t command)
             if (m->init_down) {
                 if (m->protocal == SS7_PROTO_TYPE) {
                     abort_initial_alignment(m);
+                    disable_e1_transmit(e1_no);
                     m->state = MTP2_DOWN;
                 } else if (m->protocal == PRI_PROTO_TYPE) {
                     
@@ -933,6 +935,7 @@ void mtp2_command(u8_t e1_no, u8_t command)
             LOG_W("Stop link'%d'", e1_no);
             if (m->init_down) {
                 if (m->protocal == SS7_PROTO_TYPE) {
+                    disable_e1_transmit(e1_no);
                     abort_initial_alignment(m);
                     m->state = MTP2_DOWN;
                 } else if (m->protocal == PRI_PROTO_TYPE) {
@@ -952,6 +955,7 @@ void mtp2_command(u8_t e1_no, u8_t command)
                     LOG_W("Emergent Active link'%d'", e1_no);
                     if (m->init_down) {
                         if (m->protocal == SS7_PROTO_TYPE) {
+                            enable_e1_transmit(e1_no);
                             start_initial_alignment(m, "Emergent start!");
                         } else if (m->protocal == PRI_PROTO_TYPE) {
 
@@ -1035,10 +1039,16 @@ void bad_msg_rev(u8_t e1_no, u8_t err)
      4: Overrun.
     */
    error_count[e1_no] ++;
-   if (error_count[e1_no] > 100) {
+   if (error_count[e1_no] > 300) {
        LOG_E("%d E1 Receive errors, count=%d", e1_no, error_count[e1_no]);
        error_count[e1_no] = 0;
-       e1_port_init(e1_no);
+       //e1_port_init(e1_no);
+       //disable_e1_transmit(e1_no);
+       if (m->protocal == SS7_PROTO_TYPE) {
+           m->state = MTP2_DOWN;
+       } else if (m->protocal == PRI_PROTO_TYPE) {
+           m->q921_state = Q921_TEI_UNASSIGNED;
+       }
    }
    
 }

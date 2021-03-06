@@ -82,14 +82,6 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
             }
             ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);
             connect_slot(src_slot, src_port, dst_slot, dst_port);
-            #if 0
-            if (dst_port == TONE_E1) {
-                connect_tone(src_slot, src_port, dst_slot, TONE_STREAM);
-            } else {
-                connect_slot(src_slot, src_port, dst_slot, dst_port);
-                //ds26518_mon_test2(src_port, src_slot);
-            }
-            #endif
             break;
         case CON_TONE:
             ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);

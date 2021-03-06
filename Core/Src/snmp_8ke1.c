@@ -676,7 +676,7 @@ static void snmp_process_trap_request(struct snmp_request *request)
                 heart_t *heart_msg = (heart_t *)vb.value;
                 if (ip4_addr_cmp(request->source_ip, &omc)) {
                     ram_params.timestamp = PP_HTONL(heart_msg->timestamp);
-                    LOG_I("Got OMC Server timestamp = %d", ram_params.timestamp);
+                    LOG_D("Got OMC Server timestamp = %d", ram_params.timestamp);
                 } else if (ip4_addr_cmp(request->source_ip, sn)) {
                     last_rev_sn_ht_time = now;
                     //LOG_I("Got SN Server timestampe = %d", PP_HTONL(heart_msg->timestamp));
