@@ -45,9 +45,10 @@
 #define CONF_E1		    6
 
 
-#define TONE_STREAM 	2
-#define CONF_STREAM 	4
-#define MFC_STREAM 		3
+#define TONE_STREAM 	8
+#define MFC_STREAM 		9
+#define CONF_STREAM 	10
+
 
 typedef volatile uint16_t  vu16;
 

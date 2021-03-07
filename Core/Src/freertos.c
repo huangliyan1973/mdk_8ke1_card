@@ -24,6 +24,7 @@
 #include "sched.h"
 #include "mtp.h"
 #include "server_interface.h"
+#include "shell_port.h"
 
 #define LOG_TAG              "thread"
 #define LOG_LVL              LOG_LVL_DBG
@@ -132,6 +133,9 @@ void StartDefaultTask(void *argument)
   /* init code for LWIP */
   MX_LWIP_Init();
   /* USER CODE BEGIN StartDefaultTask */
+    
+  shell_init();
+    
   mtp_init();
   
   //shell_init();

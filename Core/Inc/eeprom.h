@@ -52,13 +52,15 @@ typedef struct {
 
 typedef struct {
 	u8_t 	init_flag;
-	u8_t 	led_status[8];
+	u8_t 	led_status[E1_PORT_PER_CARD];
 	u8_t 	e1_l1_alarm;
 	u8_t 	e1_l2_alarm;
 	u8_t 	cpu_loading;
 	u8_t	conf_module_installed;
 	u8_t	mfc_module_installed;
-	u8_t 	loopback_flag[8];
+	u8_t 	loopback_flag[E1_PORT_PER_CARD];
+	u8_t	e1_status[E1_PORT_PER_CARD];
+	u8_t 	e1_status_last[E1_PORT_PER_CARD];
 	u32_t 	timestamp;
 } ram_params_t;
 
@@ -88,5 +90,20 @@ extern u8_t group_user[81];
 extern void update_eeprom(void);
 extern void reload_eeprom(void);
 extern void init_eeprom(void);
+
+#define VOICE_450HZ_TONE      16
+#define VOICE_950HZ_TONE      19
+#define VOICE_SILENT_TONE     0
+
+#define MAX_RING        100
+#define MAX_BUSY        14
+#define MAX_CONFIRM     40
+#define MAX_HOLDING     25
+#define MAX_HINT        100
+#define MAX_TEMP        100
+#define MAX_ALERT       100
+
+
+extern void tone_rt(u8_t slot);
 
 #endif /* INC_EEPROM_H_ */

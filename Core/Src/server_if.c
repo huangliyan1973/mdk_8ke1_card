@@ -31,13 +31,11 @@ extern u8_t card_id;
 card_heart_t  hb_msg;
 mtp2_heart_t mtp2_heart_msg;
 
-//void send_ss7_test_msg(void);
-//void send_isdn_test_msg(void);
 static void send_mfc_num_to_msc(void);
 
-static char *get_other_msg_type(u8_t type)
+static char *get_other_msg_type(struct other_msg *ot_msg)
 {
-    switch (type) {
+    switch (ot_msg->m_head.msg_type) {
         case CON_TIME_SLOT:
             return "Connect slot";
         case CON_TONE:
@@ -51,7 +49,10 @@ static char *get_other_msg_type(u8_t type)
         case CON_DEC_DTMF:
             return "Decode Dtmf";
         case CON_DEC_MFC:
-            return "Decode MFC";
+            if (ot_msg->playtimes == 0) {
+                return "Send ABCD";
+            }
+            return "Query MFC";
         default:
             return "Unknown";
     }
@@ -69,10 +70,10 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
     src_port = ot_msg->src_slot >> 5;
     src_slot = ot_msg->src_slot & 0x1F;
 
-    LOG_I("SN==>%s: dst_port  dst_slot  src_port  src_slt  tone_no  playtime", get_other_msg_type(ot_msg->m_head.msg_type));
-    LOG_I("\t\t\t%x\t%x\t%x\t%x\t%x\t%x", dst_port, dst_slot, src_port, src_slot,
-            ot_msg->tone_no, ot_msg->playtimes);
-    LOG_HEX("", 16, (u8_t *)p->payload, p->tot_len);
+    LOG_I("SN==>%s: %x[%x] <-- %x[%x]  tone_no=%d  playtime=%d", get_other_msg_type(ot_msg),
+            src_slot, src_port, dst_slot, dst_port, ot_msg->tone_no, ot_msg->playtimes);
+    
+    //LOG_HEX("", 16, (u8_t *)p->payload, p->tot_len);
 
     switch (ot_msg->m_head.msg_type) {
         case CON_TIME_SLOT:
@@ -82,18 +83,10 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
             }
             ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);
             connect_slot(src_slot, src_port, dst_slot, dst_port);
-            #if 0
-            if (dst_port == TONE_E1) {
-                connect_tone(src_slot, src_port, dst_slot, TONE_STREAM);
-            } else {
-                connect_slot(src_slot, src_port, dst_slot, dst_port);
-                //ds26518_mon_test2(src_port, src_slot);
-            }
-            #endif
             break;
         case CON_TONE:
             ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);
-            //connect_tone(src_slot, src_port, 16, TONE_STREAM);
+            connect_tone(src_slot, src_port, VOICE_450HZ_TONE, TONE_STREAM);
             toneno = e1_params.reason_to_tone[ot_msg->tone_no & 0x0F] & 0xF; /* tone0, tone1,...tone7 */
             slot_params[ot_msg->src_slot].connect_tone_flag = (toneno << 4) + 1;
             slot_params[ot_msg->src_slot].dmodule_ctone = ot_msg->dst_id; /* destination module when connect tone */
@@ -247,9 +240,10 @@ static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *s
     u8_t sio = serv_msg->sio;
     u8_t e1_no = serv_msg->e1_no;
 
-    if ((sio != OTHER_SIO)) {
+    if ((sio != OTHER_SIO && sio != MTP2_COMMAND_SIO)) {
         if ((e1_no >> 3) != card_id) {
             LOG_E("rev e1_no = %02X, card_id = %02X, can't match!", e1_no, card_id);
+            LOG_HEX("d", 16, p->payload, p->tot_len);
             return;
         }
     }
@@ -517,23 +511,27 @@ void update_no1_e1(u8_t new_value)
 #define CONNECT_DTMF_FLAG   2
 #define DECODE_DTMF_FLAG    3
 
+/**
 static u8_t *get_tone_cadence(u8_t index)
 {
     u8_t *tone = e1_params.tone_cadence0;
     return (tone + (u16_t)(index * 18));
 }
+**/
 
 /* Run at 50ms schedule. */ 
 void connect_tone_proc(u8_t st_slot, u8_t end_slot)
 {
-    u8_t toneno, current_delay, cadence_byte;
-    u8_t cadence_bit, cadence;
+    u8_t toneno;
+    //u8_t cadence_bit, cadence, current_delay, cadence_byte;
     u8_t dslot, con_port, con_slot, code;
-    u8_t *tone;
+    //u8_t *tone;
 
     for (u8_t slot = st_slot; slot < end_slot; slot++) {
         switch (slot_params[slot].connect_tone_flag & 0x7) {
         case CONNECT_TONE_FLAG:
+            tone_rt(slot);
+#if 0
             current_delay = slot_params[slot].ct_delay;
             toneno = (slot_params[slot].connect_tone_flag >> 4) & 0x7;
             tone = get_tone_cadence(toneno);
@@ -573,6 +571,7 @@ void connect_tone_proc(u8_t st_slot, u8_t end_slot)
                 slot_params[slot].ct_delay = 0;
             }
             slot_params[slot].connect_time--;
+#endif
             break;
         case CONNECT_DTMF_FLAG:
             toneno = (slot_params[slot].connect_tone_flag >> 4);
@@ -864,7 +863,8 @@ void period_500ms_proc(void *arg)
         LED2_OFF;
     }
 
-    update_e1_l1_status();
+    //update_e1_l1_status();
+    read_e1_status();
 
     update_e1_l2_status();
 

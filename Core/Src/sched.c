@@ -191,7 +191,7 @@ static void sched_timeout_thread(void *arg)
 
 void sched_timeout_init(void)
 {
-    sys_thread_new("sched_timout", sched_timeout_thread, NULL, SCHED_STACK_SIZE, osPriorityNormal);
+    sys_thread_new("sched_timout", sched_timeout_thread, NULL, SCHED_STACK_SIZE, osPriorityNormal+3);
 #if 0
 	if (sys_mutex_new(&time_lock) != ERR_OK) {
         CARD_ASSERT("mem allocate for time lock error!\n", 0);

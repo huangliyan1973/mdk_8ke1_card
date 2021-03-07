@@ -1432,4 +1432,6 @@ extern void ds26518_frame_status(int e1_no);
 
 extern void ds26518_bert_test(int e1_no, int slot, int system_direction);
 
+extern void read_e1_status(void);
+
 #endif /* Build for Specific Driver */

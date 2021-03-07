@@ -50,8 +50,7 @@ void check_master_clk(void)
 {
   card_id = get_card_id();
   printf("\n\nGot Card id = %X\n", card_id);
-  /* for test */
-  card_id = 0;
+     
   if (card_id & 0x0F) {
     /* slave clk */
     HAL_GPIO_WritePin(CLOCK_EN_GPIO_Port, CLOCK_EN_Pin, GPIO_PIN_RESET);
@@ -131,12 +130,14 @@ int main(void)
   led_test();
 
   ds26518_test();
-
+  
   HAL_Delay(1000);
 
   zl50020_test();
 
-  ds26518_monitor_test(0, 1);
+  ds26518_monitor_test(0, 0);
+  
+  //ds26518_zl50020_test(6,16,16);
 
   //print_zl50020(5,1);
   
@@ -145,15 +146,6 @@ int main(void)
   sram_test();
 
   module_test();
-
-  for (int i = 0; i < 16; i++) {
-    mfc_t32_zl50020_test(i);
-  }
-  
-  //ds26518_bert_test(0, 1, 0);
-  
-  //set_ds26518_master_clock(LIU_RCLK1);
-  //for(;;){}
   
   /* USER CODE END 2 */
 

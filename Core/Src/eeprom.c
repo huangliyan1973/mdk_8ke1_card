@@ -12,6 +12,7 @@
 #include "main.h"
 #include "eeprom.h"
 #include "mtp.h"
+#include "ds26518.h"
 
 #define LOG_TAG              "eeprom"
 #define LOG_LVL              LOG_LVL_DBG
@@ -157,7 +158,7 @@ void init_eeprom(void)
         e1_params.version = E1_CARD_VERSION;
         
         for( int i = 0; i < E1_CARDS; i++) {
-            e1_params.e1_enable[i] = 0x01;
+            e1_params.e1_enable[i] = 0xf;
             e1_params.e1_l2_alarm_enable[i] = 0xff;
             e1_params.e1_port_type[i] = SS7_PORT;
             e1_params.isdn_port_type[i] = PRI_CPE;
@@ -166,7 +167,7 @@ void init_eeprom(void)
             e1_params.no1_enable[i] = NO1_DISABLE;
         }
 
-        //e1_params.no1_enable[0] = 1;
+        e1_params.no1_enable[0] = 2;
 
         //init_tone_cadence();        
 
@@ -208,3 +209,128 @@ void start_flash_test_task(void)
 
 }
 #endif
+
+const u8_t ring_pat[MAX_RING] = {
+    1,1,1,1,1,1,1,1,1,1,
+	1,1,1,1,1,1,1,1,1,1,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0
+};
+
+const u8_t busy_pat[MAX_BUSY] = {
+    1,1,1,1,1,1,1,0,0,0,0,0,0,0
+};
+
+const u8_t confirm_pat[MAX_CONFIRM] = {
+    1,1,0,0,1,1,0,0,1,1,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0
+};
+
+const u8_t holding_pat[MAX_HOLDING] = {
+    0,0,0,0,1,1,0,0,0,0,
+	1,1,0,0,0,0,1,1,1,1,
+	2,1,1,1,1
+};
+
+const u8_t hint_pat[MAX_HINT] = {
+    1,1,0,0,1,1,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0
+};
+
+const u8_t alert_pat[MAX_ALERT] = {
+    1,1,1,1,0,0,0,0,0,0,
+	1,1,1,1,0,0,0,0,0,0,
+	1,1,1,1,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0
+};
+
+const u8_t temp_pat[MAX_TEMP] = {
+    1,1,1,1,1,1,1,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0
+};
+
+const u8_t tycle_max[] = {
+    MAX_RING,
+    MAX_BUSY,
+    MAX_TEMP,
+    MAX_HINT,
+    MAX_CONFIRM,
+    MAX_BUSY,
+    MAX_BUSY,
+    MAX_BUSY,
+    MAX_RING,
+    MAX_HOLDING,
+    MAX_TEMP,
+    MAX_TEMP,
+    MAX_TEMP,
+    MAX_TEMP,
+    MAX_TEMP
+};
+
+const u8_t *tone_pat[] = {
+    ring_pat,
+    busy_pat,
+    temp_pat,
+    hint_pat,
+    confirm_pat,
+    busy_pat,
+    busy_pat,
+    busy_pat,
+    holding_pat,
+    temp_pat,
+    temp_pat,
+    temp_pat,
+    temp_pat,
+    temp_pat
+};
+
+
+static u8_t tone_count[MAX_E1_TIMESLOTS * E1_PORT_PER_CARD];
+
+void tone_rt(u8_t slot)
+{
+    u8_t t_on_off;
+    u8_t tone_id = (slot_params[slot].connect_tone_flag >> 4) & 0x7;
+    
+    u8_t t_count = tone_count[slot];
+    tone_count[slot] = (t_count + 1) % tycle_max[tone_id & 0xF];
+
+    t_on_off = *(tone_pat[tone_id & 0xf] + t_count);
+
+    if (t_on_off == 1) {
+        //connect_slot(slot & 0x1f, slot >> 5, VOICE_450HZ_TONE, TONE_E1);
+        ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_ACTIVE);
+    } else {
+        ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_INACTIVE);
+    }
+}

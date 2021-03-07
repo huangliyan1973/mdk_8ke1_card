@@ -135,12 +135,17 @@ void read_rx_abcd(int e1_no, u8_t *rv_abcd)
 {
 	FRAMER *f = ds26518_framer(e1_no);
 	u8_t value;
+    //u8_t flag = 0;
 	
 	for (int i = 1; i < MAX_E1_TIMESLOTS / 2; i++) {
 		value = f->rs[i];
 		*(rv_abcd + i) = ((value & 0xf0) >> 4);
 		*(rv_abcd + i + 16) = (value & 0x0f);
 	}
+    
+//    if (flag) {
+//        LOG_HEX("rx-abcd", 16, rv_abcd, 32);
+//    }
 }
 
 void out_tx_abcd(int e1_no, u8_t slot, u8_t value)
@@ -193,6 +198,34 @@ u8_t check_liu_status(int e1_no)
 	u8_t ret = l->llsr;
 	l->llsr = ret;
 	return ret;
+}
+
+void read_e1_status(void)
+{
+	LIU *l;
+	u8_t status;
+	u8_t siglost = 0;
+	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+		l = ds26518_liu(i);
+		status = l->llsr & 1;
+		siglost |= (status << i);
+		l->llsr = 0xff;
+	}
+	ram_params.e1_l1_alarm = siglost & (~(ram_params.conf_module_installed << 6));
+	
+	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+		u8_t j = (siglost >> i) & 1;
+		if (ram_params.e1_status[i] != j) {
+			if (ram_params.e1_status_last[i] > 5) {
+				LOG_W("E1 '%d' change L1 status %x <-- %x", i, j, ram_params.e1_status[i]);
+				ram_params.e1_status[i] = j;
+			} else {
+				ram_params.e1_status_last[i]++;
+			}
+		} else {
+			ram_params.e1_status_last[i] = 0;
+		}
+	}
 }
 
 void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
@@ -249,10 +282,8 @@ void set_ds26518_master_clock(enum BACKPLANE_REFERENCE back_ref)
 		back_ref = MCLK;
 	}
 	set_ds26518_backplane_refclock(back_ref);
-	set_ds26518_tclk_src(TCLK_PIN);
+	//set_ds26518_tclk_src(TCLK_PIN);
 
-	//f->gtcr3 = 0x3;
-	//f->gtccr3 = GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL ;
 }
 
 void set_ds26518_slave_clock(void)
@@ -260,7 +291,7 @@ void set_ds26518_slave_clock(void)
 	FRAMER *f = ds26518_global_framer();
 
 	set_ds26518_backplane_refclock(REFCLKIO); 
-	set_ds26518_tclk_src(TCLK_PIN);
+	//set_ds26518_tclk_src(TCLK_PIN);
 
 	//f->gtcr3 = 0x1;
 	//f->gtccr3 = 0;
@@ -359,13 +390,14 @@ void ds26518_global_init(void)
 			continue;
 		*ucp = 0;
 	}
+    HAL_Delay(1);
 	/* GTCR1
 	 * RLOF output,
 	 * 528MD disable,
 	 * disable global interrupt
 	 * use internal ibo mux
 	 * */
-	f->gtcr1 = GTCR1_GPSEL(0) | GTCR1_GIPI ; 
+	f->gtcr1 = GTCR1_GIPI ; 
 
 	/* GFCR1
 	 * BIT7-BIT6 = 3: IBO MODE: 16.384M (8 devices on TSER1 and RSER1)
@@ -380,13 +412,10 @@ void ds26518_global_init(void)
 	 * Bit 0 = 0, TSYNCn is selected for TSYNC/TSSYNCIO[8:1] pins
 	 *       = 1, TSSYNCIOn is selected for TSYNC/TSSYNCIO[8:1] pins.
 	 */
-#ifdef IBO_ENABLE
-	f->gfcr1 = GFCR1_IBOMS(3) | GFCR1_BPCLK(3);
-	f->gtcr3 = 0x3;
-#else
+
 	f->gfcr1 = GFCR1_IBOMS(0) | GFCR1_BPCLK(3); // disable IBO, 8.192M BPCLK1
 	f->gtcr3 = 0x0;
-#endif
+
 
 	/*GTCCR3
 	 * BIT6 = 1 Use BPCLK1 as the master clock for all eight receive system clocks (Channels 1–8).
@@ -396,13 +425,12 @@ void ds26518_global_init(void)
 	 * BIT4 = 0: Use TCLKn pins for each of the transmit clock (Channels 1–8).
 	 * 		= 1: Use REFCLKIO as the master clock for all eight transmit clocks (Channels 1–8).
 	 */
-#ifdef IBO_ENABLE
-	f->gtccr3 = GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL | GTCCR3_TCLKSEL;
-#else
-	f->gtccr3 = GTCCR3_TCLKSEL; //GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL ;
-#endif
 
-	set_ds26518_global_interrupt(0);
+	f->gtccr3 = 0;
+
+    if ((card_id & 0xf) > 0) {
+        set_ds26518_slave_clock();
+    }
 
 }
 
@@ -503,10 +531,10 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 * Bit 0 = 0, CRC-4 disabled.
 	 *       = 1, CRC-4 enabled.
 	 */
-	//f->tcr1 = TCR1_TSIS | TCR1_THDB3;
-	f->tcr1 = TCR1_TSIS ;
+	f->tcr1 = TCR1_TSIS | TCR1_THDB3;
+	//f->tcr1 = TCR1_TSIS ;
 	if (sig_type == CAS_TYPE) {
-		f->tcr1 |= TCR1_T16S;
+		f->tcr1 |= TCR1_T16S | TCR1_THDB3;
 		ds25618_ts_init(e1_no);
 	} 
 
@@ -521,10 +549,10 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 #endif
 
 	/* E1AF, MUST be 0x1b */
-	f->tslc1_taf = 0x1b;
+	f->tslc1_taf = 0x9b;
 
 	/* E1NAF, MUST be 0x40 */
-	f->tslc2_tnaf = 0x40;
+	f->tslc2_tnaf = 0xdf;
 
 	/* TIOCR
 	 * Bit7 = 0, TCLKn No inversion.
@@ -533,15 +561,13 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 * 
 	 * Bit4 = 1, If TSYSCLKn is 2.048/4.096/8.192MHz or IBO enabled.
 	 * Bit3 = 0, TSSYNCIOn Mode Select Frame mode.
-	 * Bit2 = 0, TSYNCn I/O Select input.
+	 * Bit2 = 0, TSYNCn I/O Select input,  1: TSYNC I/O Select output.
 	 * Bit0 = 0, TSYNCn Mode Select Frame mode.
 	 */
-	//f->tiocr = TIOCR_TSCLKM;
-	f->tiocr = TIOCR_TSIO | TIOCR_TSCLKM; //定义TSYNC为输出
-
-	/* Transmit Elastic store is enabled */
-	/* disable transmit elastic store 2021.2.18*/
-	f->tescr = TESCR_TESE;
+	/* Disable Transmit Elastic store */
+	f->tescr = 0;
+	f->tiocr = TIOCR_TSCLKM;  //TSYNC为输入信号
+	//f->tiocr = TIOCR_TSIO | TIOCR_TSCLKM; //定义TSYNC为输出
 	
 	/* TXPC
 	 * Bit 7 = 0 ,Transmit HDLC-256 Mode Select assigned to time slots
@@ -588,8 +614,7 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 * Bit 1 = 0, Auto resync enabled.
 	 */
 	if (sig_type == CAS_TYPE) {
-		//f->rcr1 = RCR1_RHDB3 | RCR1_FRC;
-		f->rcr1 = RCR1_FRC;
+		f->rcr1 = RCR1_RHDB3 | RCR1_FRC;
 	} else {
 		f->rcr1 = RCR1_RSIGM | RCR1_RHDB3 | RCR1_FRC;
 	}
@@ -638,7 +663,10 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	/* set hdlc64 */
 	if (sig_type == CCS_TYPE){
 		ds26518_hdlc64_init(e1_no);
-	}
+	} else {
+        f->thc2 = 0;
+        f->rhc = 0;
+    }
 
 	HAL_Delay(1);
 	
@@ -682,14 +710,14 @@ void disable_e1_transmit(int e1_no)
 {
 	LIU	*liu = ds26518_liu(e1_no);
 
-	liu->lmcr &= 0xfe;
+	liu->lmcr = LMCR_TPDE | LMCR_RPDE ;
 }
 
 void enable_e1_transmit(int e1_no)
 {
 	LIU	*liu = ds26518_liu(e1_no);
 
-	liu->lmcr |= 0x1;
+	liu->lmcr = LMCR_TE;
 }
 
 void set_ds26518_loopback(int e1_no, enum LOOPBACK_TYPE lp_type)
@@ -871,25 +899,45 @@ void ds26518_test(void)
 
 	ds26518_global_init();
 
+	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+		ds26518_port_init(i, CCS_TYPE);
+	}
+
 	if (f->gsrr1 != 0) {
 		goto fault;
 	}
-
+#if 0
 	if (f->gtcr1 != GTCR1_GIPI) {
+        LOG_W("GTCR1 = 0x%x", f->gtcr1);
 		goto fault;
 	}
-
+#endif
 	if (f->gfcr1 != GFCR1_BPCLK(3)) {
+        LOG_W("GFCR1 = 0x%x", f->gfcr1);
 		goto fault;
 	}
 
 	if (f->gtcr3 != 0) {
+        LOG_W("GTCR3 = 0x%x", f->gtcr3);
 		goto fault;
 	}
 
-	if (f->gtccr3 != GTCCR3_TCLKSEL) {
+	if (f->gtccr3 != 0) {
+        LOG_W("GTCCR3 = 0x%x", f->gtccr3);
 		goto fault;
 	}
+    
+    if ((card_id & 0xf) > 0) {
+        if ((f->gtccr1 >> 4) != REFCLKIO) {
+            LOG_W("GTCCR1 = 0x%x", f->gtccr1);
+            goto fault;
+        }
+    } else {
+        if ((f->gtccr1 >> 4) != MCLK) {
+            LOG_W("GTCCR1 = 0x%x", f->gtccr1);
+            goto fault;
+        }
+    }
 
 	LOG_I("DS26518 TEST OK!");
 	return;
@@ -969,20 +1017,48 @@ void ds26518_monitor_test(int e1_no, int slot)
 	ds26518_e1_slot_enable(e1_no,slot,VOICE_ACTIVE);
 
 	//connect_tone(slot, e1_no, 0, TONE_STREAM);
-    connect_slot(slot, e1_no, 0, TONE_E1);
+    //connect_slot(slot, e1_no, 0, TONE_E1);
 	
     //set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
-    HAL_Delay(4);
+    HAL_Delay(100);
     LOG_I("Now in ds26518 monitor test, print E1 '%d' slot '%d' tx, rx data", e1_no, slot);
-    print_zl50020_cml_value(0, slot);
+    ds26518_display_rx_data(e1_no,slot);
+    read_zl50020_data_mem(e1_no, slot);
+    
+    set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
+    HAL_Delay(10);
+    
+    LOG_I("Now loopback, read some data ");
+    ds26518_display_rx_data(e1_no, slot);
+    
+	read_zl50020_data_mem(e1_no, slot);
+    
+    set_ds26518_loopback(e1_no, NO_LP);
+}
+
+void ds26518_zl50020_test(int e1_no, int slot_in, int slot_out)
+{
+   
+    FRAMER *f = ds26518_framer(e1_no);
+    ds26518_port_init(e1_no, CCS_TYPE);
+    ds26518_monitor_tx_slot(e1_no, slot_in);
+    ds26518_monitor_rx_slot(e1_no, slot_in);
     
     set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
     
-    ds26518_display_rx_data(e1_no, slot);
+    ds26518_e1_slot_enable(e1_no,slot_in,VOICE_ACTIVE); //tx, rx
     
-	read_zl50020_data_mem(0, slot);
+    HAL_Delay(10);
+    LOG_I("Now print '%d' e1 '%d' slot rx memory!", e1_no, slot_in);
+    ds26518_display_rx_data(e1_no, slot_in);
     
-    set_ds26518_loopback(e1_no, NO_LP);
+    HAL_Delay(10);
+    read_zl50020_data_mem(e1_no, slot_in);
+    
+    connect_slot(slot_in,e1_no, slot_out, e1_no);
+    HAL_Delay(10);
+    ds26518_display_rx_data(e1_no, slot_in);
+    read_zl50020_data_mem(e1_no, slot_in);
 }
 
 void ds26518_BERT_error_insert_rate(int e1_no, int err_rate)
