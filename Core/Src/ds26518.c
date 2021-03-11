@@ -302,6 +302,10 @@ void read_e1_status(void)
 			if (ram_params.e1_status_last[i] > 5) {
 				LOG_W("E1 '%d' change L1 status %x <-- %x", i, j, ram_params.e1_status[i]);
 				ram_params.e1_status[i] = j;
+				if (j == 0 && is_ccs_port(i)) {
+					/*Link is connected!*/
+					start_mtp2_process(i);
+				}
 			} else {
 				ram_params.e1_status_last[i]++;
 			}
@@ -989,7 +993,7 @@ void ds26518_test(void)
 	ds26518_global_init();
 
 	init_mtp2_mem();
-	
+
 	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
 		ds26518_port_init(i, CCS_TYPE);
 	}

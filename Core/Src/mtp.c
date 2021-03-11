@@ -175,9 +175,14 @@ static void abort_initial_alignment(mtp2_t *m)
 {
     mtp2_cleanup(m);
     m->state = MTP2_DOWN;
-    /* Retry the initial alignment after a small delay. */
-    sched_timeout(T17_TIMEOUT, mtp2_t17_timeout, m);
-    LOG_D("Aborted initial alignment on link '%d'", m->e1_no);
+
+    u8_t l1_status = (ram_params.e1_l1_alarm >> m->e1_no) & 1;
+    
+    if (l1_status == 0) {
+        /* Retry the initial alignment after a small delay. */
+        sched_timeout(T17_TIMEOUT, mtp2_t17_timeout, m);
+        LOG_D("Aborted initial alignment on link '%d'", m->e1_no);
+    }
 }
 
 /* Called on link errors that occur after the link is brought into service and
@@ -1114,6 +1119,26 @@ u8_t read_l2_status(int e1_no)
 void init_mtp2_mem(void)
 {
     memset((void*)&mtp2_state[0], 0, sizeof(mtp2_t)*E1_LINKS_MAX);
+}
+
+void start_mtp2_process(int e1_no)
+{
+    mtp2_t *m = &mtp2_state[e1_no & 7];
+
+    start_initial_alignment(m, "L1 is linkup");
+}
+
+u8_t is_ccs_port(int e1_no)
+{
+    e1_no = e1_no & 7;
+
+    if (!E1_PORT_ENABLE(e1_no))
+        return 0;
+    
+    if (CHN_NO1_PORT_ENABLE(e1_no))
+        return 0;
+
+    return 1;
 }
 
 void check_memory(void)

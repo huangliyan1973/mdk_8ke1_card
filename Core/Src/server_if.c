@@ -279,7 +279,7 @@ static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *s
             break;
         default:
             if ((sio & 0xf) < 6) {
-              LOG_HEX(rev_mtp3_msg_name(sio & 0xf), 16, serv_msg->msg.ss7.contents, serv_msg->msg_len-1);
+                LOG_HEX(rev_mtp3_msg_name(sio & 0xf), 16, p->payload, p->tot_len);
 
                 mtp2_queue_msu(e1_no & 0x7, sio, serv_msg->msg.ss7.contents, serv_msg->msg_len-1);
             }

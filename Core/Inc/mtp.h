@@ -349,6 +349,10 @@ extern sys_mutex_t lock_mtp_core;
 //extern void ds26518_send_sio_test(void);
 extern void init_mtp2_mem(void);
 
+extern u8_t is_ccs_port(int e1_no);
+
+extern void start_mtp2_process(int e1_no);
+
 extern void check_memory(void);
 
 //#define LOCK_MTP2_CORE()	sys_mutex_lock(&lock_mtp_core)
