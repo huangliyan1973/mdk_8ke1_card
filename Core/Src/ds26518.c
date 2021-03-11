@@ -102,6 +102,19 @@ void set_ds26518_global_interrupt(int enable)
 	}
 }
 
+void ds26518_set_idle_code(u8_t e1_no, u8_t slot, u8_t idle_code, u8_t flag)
+{
+    FRAMER *f = ds26518_framer(e1_no);
+    
+    if (flag) {
+        f->tidr[slot] = idle_code;
+        ds26518_e1_slot_enable(e1_no, slot, VOICE_INACTIVE);
+    } else {
+        f->tidr[slot] = 0xD5;
+        ds26518_e1_slot_enable(e1_no, slot, VOICE_ACTIVE);
+    }
+}
+
 static void ds26518_tcice_init(int e1_no)
 {
 	FRAMER *f = ds26518_framer(e1_no);
@@ -191,26 +204,96 @@ u8_t read_liu_status(int e1_no)
 	return ret;
 }
 
+char *get_lrsr_value(u8_t lrsl)
+{
+	u8_t value = lrsl >> 4;
+	static char *signal_level[] = {
+		">-2.5",
+		"-2.5 to -5",
+		"-5 to -7.5",
+		"-7.5 to -10",
+		"-10 to -12.5",
+		"-12.5 to -15",
+		"-15 to -17.5",
+		"-17.5 to -20",
+		"-20 to -22.5",
+		"-22.5 to -25",
+		"-25 to -27.5",
+		"-27.5 to -30",
+		"-30 to -32.5",
+		"-32.5 to -35",
+		"-35 to -37.5",
+		"<-37.5"
+	};
+
+	return signal_level[value & 0xf];
+}
 /* >0 mean liu has some problem */
 u8_t check_liu_status(int e1_no)
 {
 	LIU *l = ds26518_liu(e1_no);
-	u8_t ret = l->llsr;
-	l->llsr = ret;
-	return ret;
+	u8_t llsr = l->llsr;
+	u8_t lrsl = l->lrsl;
+	u8_t lrsr = l->lrsr;
+
+	if (llsr & 1){
+		if (lrsr & 1) {
+			LOG_W("Loss of Signal Detect (LOSD) on %d LINK\r\n", e1_no);
+		}else {
+			LOG_W("Loss of Signal Detect (LOSD) on %d LINK, but real status not show", e1_no);
+		}
+	}
+	if (llsr & 2){
+		
+		LOG_W("Short-Circuit Detect (SCD) on %d LINK, lrsr=%x", e1_no, lrsr);
+	}
+	if (llsr & 4){
+		LOG_W("Open-Circuit Detect (OCD) on %d LINK, lrsr=%x", e1_no, lrsr);
+	}
+	if (llsr & 0x10){
+		LOG_W("Loss of Signal Clear (LOSC) on %d LINK\r\n", e1_no);
+	}
+	if (llsr & 0x20){
+		LOG_W("Short-Circuit Clear (SCC) on %d LINK\r\n", e1_no);
+	}
+	if (llsr & 0x40){
+		LOG_W("Open-Circuit Clear (OCC) on %d LINK\r\n", e1_no);
+	}
+	l->llsr = llsr;
+	LOG_I("LIU Receive signal Level = %s on %d LINK\r\n", get_lrsr_value(lrsl), e1_no);
+	return llsr;
 }
 
 void read_e1_status(void)
 {
+    static u8_t l1_status = 0;
 	LIU *l;
-	u8_t status;
+	u8_t status, llsr;
 	u8_t siglost = 0;
+    
 	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
 		l = ds26518_liu(i);
-		status = l->llsr & 1;
+        llsr = l->llsr;
+		if ((llsr & 0xf) > 0 || (l->lrsl >> 4) > 6) {
+			/* Bit 3: Jitter Attenuator Limit Trip Set
+			* Bit 2: Open-Circuit Detect
+			* Bit 1: Short-Circuit Detect
+			* Bit 0: Loss of Signal Detect
+			*/
+			status = 1;
+		} else {
+			status = 0;
+		}
+
 		siglost |= (status << i);
-		l->llsr = 0xff;
+		l->llsr = llsr;
 	}
+    
+    if (l1_status != siglost) {
+        LOG_W("L1 status changed! %x --> %x", l1_status, siglost);
+        l1_status = siglost;
+    }
+    
 	ram_params.e1_l1_alarm = siglost & (~(ram_params.conf_module_installed << 6));
 	
 	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
@@ -372,8 +455,16 @@ void ds26518_global_init(void)
 	 * 			  MPS = 10, MCLK = 8.192M
 	 * 			  MPS = 11, MCLK = 16.384M
 	 */
-	f->gtccr1 = 0x80; //2.048MHz derived from MCLK. (REFCLKIO is an output.)
-
+	if ((card_id & 0xf) > 0) {
+		/* REFCLKIO is input */
+		f->gtccr1 = 0x90;
+	}else {
+		/* 2.048MHz derived from MCLK. (REFCLKIO is an output.) */
+		f->gtccr1 = 0x80; 
+	}
+	
+	LOG_W("REF CLOCK = %x", f->gtccr1);
+	
 	dummy = f->idr;		/* delay at least 300 ns */
 	dummy = f->idr;
 
@@ -427,10 +518,6 @@ void ds26518_global_init(void)
 	 */
 
 	f->gtccr3 = 0;
-
-    if ((card_id & 0xf) > 0) {
-        set_ds26518_slave_clock();
-    }
 
 }
 
@@ -593,7 +680,7 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
     #endif
     
 	/* The Transmit Idle Code Definition Registers */
-	memset((void *)f->tidr, 0x55, 32);
+	memset((void *)f->tidr, 0xD5, 32);
 
 	/* The Transmit Channel Idle Code Enable registers */
 	ds26518_tcice_init(e1_no);
@@ -785,6 +872,7 @@ void ds26518_send_sio_test(void)
 	}
 }
 
+#if 0
 void ds26518_isr(void)
 {
 	u8_t index;
@@ -856,6 +944,7 @@ void ds26518_isr(void)
 		}
 	}
 }
+#endif
 
 /* Below for Ds26518 poll function */
 
@@ -899,6 +988,8 @@ void ds26518_test(void)
 
 	ds26518_global_init();
 
+	init_mtp2_mem();
+	
 	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
 		ds26518_port_init(i, CCS_TYPE);
 	}
@@ -970,6 +1061,7 @@ u8_t ds26518_read_monitor_rx_slot(int e1_no)
 	return f->rdsom;
 }
 
+#if 0
 void ds26518_mon_test2(int e1_no, int slot)
 {
     FRAMER *f = ds26518_framer(e1_no);
@@ -985,6 +1077,7 @@ void ds26518_mon_test2(int e1_no, int slot)
     
 	read_zl50020_data_mem(0, slot);
 }
+#endif
 
 void ds26518_display_rx_data(int e1_no, int slot)
 {
@@ -1010,20 +1103,12 @@ void ds26518_display_rx_data(int e1_no, int slot)
 }
 void ds26518_monitor_test(int e1_no, int slot)
 {
+	u8_t test_value ;
     FRAMER *f = ds26518_framer(e1_no);
     ds26518_port_init(e1_no, CCS_TYPE);
     ds26518_monitor_tx_slot(e1_no, slot);
     ds26518_monitor_rx_slot(e1_no, slot);
 	ds26518_e1_slot_enable(e1_no,slot,VOICE_ACTIVE);
-
-	//connect_tone(slot, e1_no, 0, TONE_STREAM);
-    //connect_slot(slot, e1_no, 0, TONE_E1);
-	
-    //set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
-    HAL_Delay(100);
-    LOG_I("Now in ds26518 monitor test, print E1 '%d' slot '%d' tx, rx data", e1_no, slot);
-    ds26518_display_rx_data(e1_no,slot);
-    read_zl50020_data_mem(e1_no, slot);
     
     set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
     HAL_Delay(10);
@@ -1031,11 +1116,17 @@ void ds26518_monitor_test(int e1_no, int slot)
     LOG_I("Now loopback, read some data ");
     ds26518_display_rx_data(e1_no, slot);
     
-	read_zl50020_data_mem(e1_no, slot);
+	if (slot == 0) {
+		test_value = 0x9b;
+	}else {
+		test_value = 0x7f;
+	}
+	read_zl50020_data_mem(e1_no, slot, test_value);
     
     set_ds26518_loopback(e1_no, NO_LP);
 }
 
+#if 0
 void ds26518_zl50020_test(int e1_no, int slot_in, int slot_out)
 {
    
@@ -1060,6 +1151,7 @@ void ds26518_zl50020_test(int e1_no, int slot_in, int slot_out)
     ds26518_display_rx_data(e1_no, slot_in);
     read_zl50020_data_mem(e1_no, slot_in);
 }
+#endif
 
 void ds26518_BERT_error_insert_rate(int e1_no, int err_rate)
 {
@@ -1228,303 +1320,4 @@ void ds26518_frame_status(int e1_no)
     }
 #endif
 }
-
-#if 0
-void ds26518_isr(void)
-{
-	LIU	*liu;
-
-	FRAMER *f = ds26518_global_framer();
-
-	//uint8_t frameISRStatus = f->gfisr1; //指示哪个FRAME发生中断，每一位表示一个FRAMER（0-7）
-	//uint8_t BERTISRStatus = f->gbisr1; //BERT中断指示，每一位表示一个FRAMER（0-7）
-	//uint8_t LiuISRStatus = f->glisr1; //LIU中断指示
-
-	//根据前面读取的状态标志确定chl通道号
-	uint8_t chl = 0; // chl 表示具体的通道号，chl = 0 - 7;
-
-	f = ds26518_framer(chl);
-	uint8_t tls_status = f->tiir; //Transmit Latched Status Register(TLS)1-3
-	if (tls_status & 1){//TLS1 interrupt actived.
-		uint8_t tls1 = f->tls1;
-		if (tls1 & 1){
-			vLog(MONITOR_DEBUG,"Loss of Transmit Clock Condition on %d LINK,Check TCLKn pin!\r\n", chl);
-		}
-		if (tls1 & 2){
-			vLog(MONITOR_DEBUG,"Loss of Transmit Clock Condition Cleard on %d LINK\r\n", chl);
-		}
-		if (tls1 & 4 ){
-			vLog(MONITOR_DEBUG,"Set every 2ms on transmit multiframe boundaries on %d LINK\r\n", chl);
-			//Used to alert the host that signaling data needs to be updated
-			//可以作为2ms的定时器
-		}
-		if (tls1 & 0x20){
-			vLog(MONITOR_DEBUG,"Transmit Elastic Store Slip Occurrence Event on %d LINK\r\n", chl);
-		}
-		if (tls1 & 0x40){
-			vLog(MONITOR_DEBUG,"Transmit Elastic Store Empty Event on %d LINK\r\n", chl);
-		}
-		if (tls1 & 0x80){
-			vLog(MONITOR_ERR,"Transmit Elastic Store FULL Event on %d LINK\r\n", chl);
-		}
-		f->tls1 = tls1;
-	}
-	if (tls_status & 2){ //TLS2
-		//for HDLC64....
-		uint8_t tls2 = f->tls2;
-		if (tls2 & 1){
-			vLog(MONITOR_DEBUG,"Transmit FIFO Not Full Set Condition (TNFS) on %d LINK\r\n", chl);
-		}
-		if (tls2 & 2){
-			vLog(MONITOR_DEBUG,"Transmit FIFO Below Low Watermark Set Condition (TLWMS) on %d LINK\r\n", chl);
-			if (msg_len > 0){ //need to send.
-				uint8_t count = f->tfba;
-				uint8_t i;
-				if (msg_len > count){
-					for(i = 0; i < count; i++){
-						f->thf = msg_buf[i];
-					}
-					msg_len -= count;
-
-					for(i = 0; i < msg_len; i++){
-						msg_buf[i] = msg_buf[i + count];
-					}
-					vLog(MONITOR_WARN, "Already send %d byte, NOT END...\r\n",count);
-				}else{
-					for(i = 0; i < msg_len-1; i++){
-						f->thf = msg_buf[i];
-					}
-					f->thc1 |= THC1_TEOM; // bit2 of thc1 TEOM
-					f->thf = msg_buf[msg_len -1];
-					vLog(MONITOR_WARN, "Already send %d byte,Waite a interrupt end.\r\n",msg_len);
-					msg_len =  0;
-					f->tim2 |= TIM2_TMEND;
-				}
-			}
-		}
-		if (tls2 & 4 ){
-			vLog(MONITOR_DEBUG,"Transmit Message End Event (TMEND) on %d LINK\r\n", chl);
-			f->tim2 &= (~TIM2_TMEND);
-		}
-		if (tls2 & 8 ){
-			vLog(MONITOR_DEBUG,"Transmit FIFO Underrun Event (TUDR) on %d LINK\r\n", chl);
-		}
-		f->tls2 = tls2;
-	}
-	if (tls_status & 4){ //TLS3
-		uint8_t tls3 = f->tls3;
-		if (tls3  & 1){
-			vLog(MONITOR_DEBUG,"Loss Of Frame (LOF) on %d LINK\r\n", chl);
-		}
-		if (tls3 & 2){
-			vLog(MONITOR_DEBUG,"Loss Of Frame Synchronization Detect (LOFD) on %d LINK\r\n", chl);
-		}
-		f->tls3 = tls3;
-	}
-
-	uint8_t rls_status = f->riir; //RLS1,3,4,5,7
-	if (rls_status & 1){ //RLS1
-		uint8_t rls1 = f->rls1;
-		if (rls1 & 1){
-			vLog(MONITOR_DEBUG,"Receive Loss of Frame Condition Detect (RLOFD) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 2){
-			vLog(MONITOR_DEBUG,"Receive Loss of Signal Condition Detect (RLOSD) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 4){
-			vLog(MONITOR_DEBUG,"Receive Alarm Indication Signal Condition Detect (RAISD) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 8){
-			vLog(MONITOR_DEBUG,"Receive Remote Alarm Indication Condition Detect (RRAID) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 0x10){
-			vLog(MONITOR_DEBUG,"Receive Loss of Frame Condition Clear (RLOFC) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 0x20){
-			vLog(MONITOR_DEBUG,"Receive Loss of Signal Condition Clear (RLOSC) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 0x40){
-			vLog(MONITOR_DEBUG,"Receive Alarm Indication Signal Condition Clear (RAISC) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 0x80){
-			vLog(MONITOR_DEBUG,"Receive Remote Alarm Indication Condition Clear (RRAIC) on %d LINK\r\n", chl);
-		}
-		f->rls1 = rls1;
-	}
-	if (rls_status & 2){ //RLS2 for E1
-		uint8_t rls2 = f->rls2;
-		if (rls2 & 1){
-			vLog(MONITOR_DEBUG,"Receive Align Frame Event (RAF) every 250us on %d LINK\r\n", chl);
-		}
-		if (rls2 & 2){
-			vLog(MONITOR_DEBUG,"Receive CRC-4 Multiframe Event (RCMF) every 2ms on %d LINK\r\n", chl);
-		}
-		if (rls2 & 4){
-			vLog(MONITOR_DEBUG,"Receive Signaling All Zeros Event (RSA0) on %d LINK\r\n", chl);
-		}
-		if (rls2 & 8){
-			//enabled in CCS mode.the contents of time slot 16 contains fewer than three zeros over 16 consecutive frames
-			vLog(MONITOR_DEBUG,"Receive Signaling All Ones Event (RSA1) on %d LINK\r\n", chl);
-		}
-		if (rls2 & 0x10){
-			vLog(MONITOR_DEBUG,"FAS Resync Criteria Met Event (FASRC) on %d LINK\r\n", chl);
-		}
-		if (rls2 & 0x20){
-			vLog(MONITOR_DEBUG,"CAS Resync Criteria Met Event (CASRC) on %d LINK\r\n", chl);
-		}
-		if (rls2 & 0x40){
-			vLog(MONITOR_DEBUG,"CRC Resync Criteria Met Event (CRCRC) on %d LINK\r\n", chl);
-		}
-		f->rls2 = rls2;
-	}
-	if (rls_status & 4){ //RLS3 for E1
-		uint8_t rls3 = f->rls3;
-		if (rls3 & 1){
-			vLog(MONITOR_DEBUG,"Receive Distant MF Alarm Detect (RDMAD) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 2){
-			vLog(MONITOR_DEBUG,"V5.2 Link Detect (V52LNKD) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 8){
-			vLog(MONITOR_DEBUG,"Loss of Receive Clock Detect (LORCD) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 0x10){
-			vLog(MONITOR_DEBUG,"Receive Distant MF Alarm Clear (RDMAC) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 0x20){
-			vLog(MONITOR_DEBUG,"V5.2 Link Detected Clear (V52LNKC) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 0x80){
-			vLog(MONITOR_DEBUG,"Loss of Receive Clock CLEAR (LORCC) on %d LINK\r\n", chl);
-		}
-		f->rls3 = rls3;
-	}
-	if (rls_status & 8){ //RLS4
-		uint8_t rls4 = f->rls4;
-		if (rls4 & 1){
-			vLog(MONITOR_DEBUG,"Receive Multiframe Event (RMF) every 2ms on %d LINK\r\n", chl);
-		}
-		if (rls4 & 2){
-			vLog(MONITOR_DEBUG,"Timer Event (TIMER) Set on increments of 1 second or 62.5ms based on RCLKn on %d LINK\r\n", chl);
-		}
-		if (rls4 & 4){
-			vLog(MONITOR_DEBUG,"One-Second Timer (1SEC) on %d LINK\r\n", chl);
-		}
-		if (rls4 & 8){
-			//Signaling Change of State Interrupt Enable registers (RSCSE1 through RSCSE3) changes signaling state.
-			vLog(MONITOR_DEBUG,"Receive Signaling Change of State Event (RSCOS) on %d LINK\r\n", chl);
-		}
-		if (rls4 & 0x20){
-			vLog(MONITOR_DEBUG,"Receive Elastic Store Slip Occurrence Event (RSLIP) on %d LINK\r\n", chl);
-		}
-		if (rls4 & 0x40){
-			vLog(MONITOR_DEBUG,"Receive Elastic Store Empty Event (RESEM) on %d LINK\r\n", chl);
-		}
-		if (rls4 & 0x80){
-			vLog(MONITOR_ERR,"Receive Elastic Store Full Event (RESF) on %d LINK\r\n", chl);
-		}
-		f->rls4 = rls4;
-	}
-
-	if (rls_status & 0x10){ //RLS5
-		//For HDLC-64 status
-		uint8_t rls5 = f->rls5;
-		if (rls5 & 1){
-			vLog(MONITOR_DEBUG,"Receive FIFO Not Empty Set Event (RNES) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 2){
-			vLog(MONITOR_DEBUG,"Receive FIFO Above High Watermark Set Event (RHWMS) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 4){
-			vLog(MONITOR_DEBUG,"Receive Packet Start Event (RPS) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 8){
-			//Signaling Change of State Interrupt Enable registers (RSCSE1 through RSCSE3) changes signaling state.
-			vLog(MONITOR_DEBUG,"Receive Packet End Event (RPE) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 0x10){
-			vLog(MONITOR_DEBUG,"Receive HDLC-64 Opening Byte Event (RHOBT) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 0x20){
-			vLog(MONITOR_DEBUG,"Receive FIFO Overrun (ROVR) on %d LINK\r\n", chl);
-		}
-		f->rls5 = rls5;
-	}
-	if (rls_status & 0x40){ //RLS7
-		//Not used...
-	}
-
-	liu = ds26518_liu(chl);
-
-	uint8_t llsr = liu->llsr; /* Bit6: Open-Circuit Clear (OCC). This latched bit is set when an open circuit condition was detected at TTIPn and TRINGn and then removed
-						Bit5: Short-Circuit Clear (SCC). This latched bit is set when a short circuit condition was detected at TTIPn and TRINGn and then removed
-						Bit4: Loss of Signal Clear (LOSC). This latched bit is set when a loss of signal condition was detected at RTIPn and RRINGn and then removed.
-						Bit 2: Open-Circuit Detect (OCD). This latched bit is set when open-circuit condition is detected at TTIPn and TRINGn
-						Bit 1: Short-Circuit Detect (SCD). This latched bit is set when short-circuit condition is detected at TTIPn and TRINGn
-						Bit 0: Loss of Signal Detect (LOSD). This latched bit is set when an LOS condition is detected at RTIPn and RRINGn  */
-	if (llsr & 1){
-		vLog(MONITOR_ERR,"Loss of Signal Detect (LOSD) on %d LINK\r\n", chl);
-	}
-	if (llsr & 2){
-		vLog(MONITOR_ERR,"Short-Circuit Detect (SCD) on %d LINK\r\n", chl);
-	}
-	if (llsr & 4){
-		vLog(MONITOR_ERR,"Open-Circuit Detect (OCD) on %d LINK\r\n", chl);
-	}
-	if (llsr & 0x10){
-		vLog(MONITOR_DEBUG,"Loss of Signal Clear (LOSC) on %d LINK\r\n", chl);
-	}
-	if (llsr & 0x20){
-		vLog(MONITOR_DEBUG,"Short-Circuit Clear (SCC) on %d LINK\r\n", chl);
-	}
-	if (llsr & 0x40){
-		vLog(MONITOR_DEBUG,"Open-Circuit Clear (OCC) on %d LINK\r\n", chl);
-	}
-
-	liu->llsr = llsr;
-	//uint8_t bsr = (BERT *)(&dev->bert[chl])->bsr; //误码检测相关设置，暂时不用
-
-}
-#endif
-
-#if 0
-/*
- * direction = 0 : 出方向设置IDLE Code transmit
- * 			 = 1 :   入方向设置IDLE Code  receive
- * e1_no  = 0-7
- * slot = 0-31
- */
-void insert_idle_slot(int direction, uint8_t e1_no, uint8_t slot)
-{
-	volatile uint8_t *pEnable, *pData;
-
-	f = (FRAMER *)(&dev->te1[e1_no]);
-	if(direction == 0){ //设置出方向时隙为IDLE Code
-		pEnable = f->tcice;
-		pData = f->tidr;
-	}else{
-		pEnable = f->rcice;
-		pData = f->ridr;
-	}
-
-	*(pEnable  + (slot << 3)) |=  1 << (slot & 7);
-
-	*(pData + slot) = 0x55; //IDLE Code for uLaw.
-}
-
-void insert_normal_slot(int direction, uint8_t e1_no, uint8_t slot)
-{
-
-	volatile uint8_t  *pEnable;
-
-	f = (FRAMER *)(&dev->te1[e1_no]);
-	if(direction == 0){ //设置出方向时隙为IDLE Code
-		pEnable = f->tcice;
-	}else{
-		pEnable = f->rcice;
-	}
-
-	*(pEnable  + (slot << 3)) &=  ~(1 << (slot & 7));
-}
-#endif
 

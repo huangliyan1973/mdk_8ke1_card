@@ -1434,4 +1434,6 @@ extern void ds26518_bert_test(int e1_no, int slot, int system_direction);
 
 extern void read_e1_status(void);
 
+extern void ds26518_set_idle_code(u8_t e1_no, u8_t slot, u8_t idle_code, u8_t flag);
+
 #endif /* Build for Specific Driver */

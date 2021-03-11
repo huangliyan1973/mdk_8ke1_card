@@ -219,27 +219,27 @@ typedef struct mtp2_state{
 		MTP2_INSERVICE,
 	} state;
 
-	int send_fib;
-	int send_bsn, send_bib;
+	u8_t send_fib;
+	u8_t send_bsn, send_bib;
 
-	int sls;
-	int subservice;
+	u8_t sls;
+	u8_t subservice;
 
-	int e1_no;
+	u8_t e1_no;
 
 	u8_t rx_buf[MTP_MAX_PCK_SIZE];
-	int rx_len;
+	u16_t rx_len;
 
 	u8_t tx_buffer[MTP_MAX_PCK_SIZE];
-	int tx_len;
+	u16_t tx_len;
 
 	/* Last few raw bytes received, for debugging link errors. */
 	u8_t backbuf[32];
-	int backbuf_idx;
+	u16_t backbuf_idx;
 
 	/*Retransmit buffer */
 	struct {
-		int len;
+		u16_t len;
 		u8_t buf[MTP_MAX_PCK_SIZE];
 	}retrans_buf[128];
 
@@ -251,55 +251,57 @@ typedef struct mtp2_state{
 	/* Last sequence number sent to peer. */
 	int retrans_last_sent;
 
-	int bsn_errors;
+	u16_t bsn_errors;
 
-	int protocal;
+	u16_t protocal;
 
-	int init_down;
+	u16_t init_down;
+
+	u16_t emergent_setup;
 
 	/****************************ISDN PRI Part *************************/
 
-	int pri_mode;
+	u16_t pri_mode;
 
 	enum q921_state q921_state;
 
 	enum q921_tei_check_state	tei_check;
 
-	int sapi;
-	int tei;
-	int ri;   /*TEI assignment random indicator */
+	u8_t sapi;
+	u8_t tei;
+	u8_t ri;   /*TEI assignment random indicator */
 
 	/*! V(A) - Next I-frame sequence number needing ack */
-	int v_a;
+	u8_t v_a;
 	/*! V(S) - Next I-frame sequence number to send */
-	int v_s;
+	u8_t v_s;
 	/*! V(R) - Next I-frame sequence number expected to receive */
-	int v_r;
+	u8_t v_r;
 
 	struct {
-		int len;
+		u16_t len;
 		u8_t buf[U_S_PCK_SIZE];
 	}u_s_frame[U_S_PCK_BUFF_SIZE];
 
-	int s_h, s_t;
+	u16_t s_h, s_t;
 
 	/*! T-200 retransmission timer */
-	int t200_timer;
+	u16_t t200_timer;
 	/*! Retry Count (T200) */
-	int RC;
+	u16_t RC;
 	//int t201_timer;
 	//int t202_timer;
-	int n202_counter;
+	u16_t n202_counter;
 	/*! Max idle time */
 	//int t203_timer;
 	/*! Layer 2 persistence restart delay timer */
 	//int restart_timer;
 
-	int t201_expirycnt;
+	u16_t t201_expirycnt;
 
 	/* MDL variables */
 	//int mdl_timer;
-	int mdl_error;
+	u16_t mdl_error;
 	unsigned int mdl_free_me:1;
 
 	unsigned int peer_rx_busy:1;
@@ -344,7 +346,10 @@ extern void e1_port_init(int e1_no);
 
 extern sys_mutex_t lock_mtp_core;
 
-extern void ds26518_send_sio_test(void);
+//extern void ds26518_send_sio_test(void);
+extern void init_mtp2_mem(void);
+
+extern void check_memory(void);
 
 //#define LOCK_MTP2_CORE()	sys_mutex_lock(&lock_mtp_core)
 //#define UNLOCK_MTP2_CORE()  sys_mutex_unlock(&lock_mtp_core)

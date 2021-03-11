@@ -66,7 +66,7 @@ static void mtp2_t2_timeout(void *arg)
 {
     mtp2_t *m = (mtp2_t *)arg;
     LOG_W("MTP2 timer T2 timeout (failed to receive 'O', 'N', "
-             "or 'E' after sending 'O'), initial alignment failed on link '%d'", m->e1_no);
+             "or 'E'), initial alignment failed on link '%d'", m->e1_no);
 
     abort_initial_alignment(m);
 }
@@ -77,7 +77,7 @@ static void mtp2_t3_timeout(void *arg)
 {
     mtp2_t *m = (mtp2_t *)arg;
     LOG_W("MTP2 timer T3 timeout (failed to receive 'N', "
-             "or 'E' after sending 'O'), initial alignment failed on link '%d'", m->e1_no);
+             "or 'E'), initial alignment failed on link '%d'", m->e1_no);
 
     abort_initial_alignment(m);
 }
@@ -222,30 +222,22 @@ static void start_initial_alignment(mtp2_t *m, char* reason)
     m->send_bsn = 0x7f;
     m->send_bib = 1;
     m->tx_len = 0;
-    
+    m->rx_len = 0;
+
     m->retrans_seq = -1;
     m->retrans_last_acked = 0x7f;
     m->retrans_last_sent = 0x7f;
     
     m->bsn_errors = 0;
 
-    LOG_D("Starting initial alignment on link '%d', reason: %s.", m->e1_no, reason);
-    sched_timeout(T2_TIMEOUT, mtp2_t2_timeout, m);
-}
-
-static char *rev_mtp3_msg_name(u8_t sio)
-{
-    if (sio == 1 || sio == 0) {
-        return "SN:==>SNM";
-    } else if (sio == 3) {
-       return "SN:==>SCCP";
-    } else if (sio == 4) {
-        return "SN:==>TUP";
-    } else if (sio == 5) {
-        return "SN:==>ISUP";
+    if (strcmp(reason, "Emergent start!") == 0) {
+        m->emergent_setup = 1;
+    } else {
+        m->emergent_setup = 0;
     }
 
-    return "SN:==>UNKOWN";
+    LOG_D("Starting initial alignment on link '%d', reason: %s.", m->e1_no, reason);
+    sched_timeout(T2_TIMEOUT, mtp2_t2_timeout, m);
 }
 
 /* Find a frame to transmit and put it in the transmit buffer.
@@ -292,10 +284,17 @@ mtp2_pick_frame(mtp2_t *m)
         m->tx_buffer[0] = m->send_bsn | (m->send_bib << 7);
         m->tx_buffer[1] = m->retrans_last_sent | (m->send_fib << 7);
         m->tx_buffer[2] = 1;      /* Length 1, meaning LSSU. */
-        m->tx_buffer[3] = 2;
+        if (m->emergent_setup == 1) {
+            m->tx_buffer[3] = 2;
+        } else {
+            m->tx_buffer[3] = 1;
+        }        
         sin_scount++;
 #ifdef MTP2_LSSU_DEBUG
-        LOG_D("<--SIE");
+        if (m->emergent_setup == 1)
+            LOG_D("<--SIE");
+        else
+            LOG_D("<--SIN");
 #endif
         return;
 
@@ -312,6 +311,10 @@ mtp2_pick_frame(mtp2_t *m)
                    m->retrans_buf[m->retrans_seq].buf,
                    m->retrans_buf[m->retrans_seq].len);
             m->tx_len = m->retrans_buf[m->retrans_seq].len;
+            if (m->tx_len > MTP_MAX_PCK_SIZE) {
+                LOG_E("E1 '%d' tx_len=%d, out of buffer len, retrans_seq=%d", m->e1_no, m->tx_len, m->retrans_seq);
+                return;
+            }
             m->tx_buffer[0] = m->send_bsn | (m->send_bib << 7);
             m->tx_buffer[1] = m->retrans_seq | (m->send_fib << 7);
 
@@ -322,9 +325,6 @@ mtp2_pick_frame(mtp2_t *m)
                 /* Move to the next one. */
                 m->retrans_seq = MTP_NEXT_SEQ(m->retrans_seq);
             }
-
-            /* for debug */
-            LOG_HEX(rev_mtp3_msg_name(m->tx_buffer[3] & 0xf), 16, m->tx_buffer, m->tx_len);
 
             return;
         }
@@ -346,6 +346,8 @@ mtp2_pick_frame(mtp2_t *m)
 void mtp2_queue_msu(u8_t e1_no, u8_t sio, u8_t *sif, int len)
 {
 	int i;
+    e1_no = e1_no & 0x7;
+
     mtp2_t *m = &mtp2_state[e1_no];
 
     if (m->state != MTP2_INSERVICE)
@@ -434,6 +436,12 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
 
         sin_rcount++;
 
+        if (typ == 1) {
+            m->emergent_setup = 0;
+        } else {
+            m->emergent_setup = 1;
+        }
+
         if (m->state == MTP2_NOT_ALIGNED) {
 
             sched_untimeout(mtp2_t2_timeout, m);
@@ -456,7 +464,10 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
             mtp3_link_fail(m, 0);
         }
 #ifdef MTP2_LSSU_DEBUG
-        LOG_I("-->SIN");
+        if (typ == 1)
+            LOG_I("-->SIN");
+        else
+            LOG_I("-->SIE");
 #endif
         break;
 
@@ -699,7 +710,7 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
  */
 static void mtp2_read_su(mtp2_t *m, u8_t *buf, int len)
 {
-	if((len > MTP_MAX_PCK_SIZE) || (len < 3)) {
+	if((len > MTP_MAX_PCK_SIZE) || (len < 3) || (m->e1_no >= E1_PORT_PER_CARD)) {
 		LOG_W("Overlong/too short MTP2 frame %d, dropping on link '%d'", len, m->e1_no);
         //LOG_HEX("Error", 16, buf, len);
 		return;
@@ -715,6 +726,7 @@ static void prepare_init_link(int e1_no)
     }
 
     mtp2_t *m = &mtp2_state[e1_no];
+    
     m->e1_no = e1_no;
     m->tx_len = m->rx_len = 0;
 
@@ -804,7 +816,7 @@ void mtp_lowlevel_scan(void *arg)
     for(;;) {
         if (osSemaphoreAcquire(mtp_semaphore, portMAX_DELAY) == osOK) {
             LOCK_MTP2_CORE();
-            ds26518_isr();
+            //ds26518_isr();
             UNLOCK_MTP2_CORE();
         }
     }
@@ -822,11 +834,13 @@ static void mtp_lowlevel_init(void)
 
 #else
 
+#define CONF_E1         6
+
 static void mtp2_thread(void *arg)
 {
     LWIP_UNUSED_ARG(arg);
 
-    mtp2_t *m;
+    mtp2_t *m = NULL;
     TickType_t  xPeriod = pdMS_TO_TICKS(4); //4ms 运行一次
 	TickType_t xLastWakeTime;
 	xLastWakeTime = xTaskGetTickCount();
@@ -842,11 +856,15 @@ static void mtp2_thread(void *arg)
                 (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_TEI_UNASSIGNED)) {
                     continue;
                 }
-/*
-            if (check_liu_status(i)) {
+
+            if (ram_params.conf_module_installed && i == CONF_E1) {
                 continue;
             }
-*/
+
+            if ((ram_params.e1_l1_alarm >> i) & 1) {
+                continue;
+            }
+
             ds26518_tx_rx_poll(i);
 
        }
@@ -868,21 +886,19 @@ void mtp_init(void)
     }
 #endif
 
-    ds26518_global_init();
+    //ds26518_global_init();
     
-    memset((void*)&mtp2_state[0], 0, sizeof(mtp2_t)*E1_LINKS_MAX);
+    //memset((void*)&mtp2_state[0], 0, sizeof(mtp2_t)*E1_LINKS_MAX);
 
     for(int index = 0; index < E1_LINKS_MAX; index++) {
         e1_port_init(index);
     }
 
-    //e1_port_init(0);
-
 #ifndef MTP2_POLL_ENABLE
     mtp_semaphore = osSemaphoreNew(1, 1, NULL);
     mtp_lowlevel_init();
 #else
-    sys_thread_new("mtp2", mtp2_thread, NULL, DEFAULT_THREAD_STACKSIZE, osPriorityNormal);
+    sys_thread_new("mtp2", mtp2_thread, NULL, DEFAULT_THREAD_STACKSIZE, osPriorityNormal + 1);
 #endif
 }
 
@@ -892,6 +908,8 @@ void mtp_init(void)
 void mtp2_command(u8_t e1_no, u8_t command)
 {
     static u32_t last_time[E1_LINKS_MAX] = {0};
+
+    e1_no = e1_no & 7;
 
     mtp2_t *m = &mtp2_state[e1_no];
 
@@ -975,13 +993,29 @@ void mtp2_command(u8_t e1_no, u8_t command)
 /* All below function called by ds26518 ISR routing procedure. */
 void send_ccs_msg(u8_t e1_no, u8_t send_len)
 {
+    e1_no = e1_no & 7;
+
     mtp2_t *m = &mtp2_state[e1_no];
+
+    /* 判断链路连接状态 */
+
+    if (m->tx_len > MTP_MAX_PCK_SIZE) {
+        LOG_E("E1 '%d' tx_len = %d, over long , reset it!", e1_no, m->tx_len);
+        check_memory();
+        //LOG_HEX("tx_buf", 16, m->tx_buffer, 32);
+        m->tx_len = 0;
+    }
 
     if (m->tx_len == 0) {
         if (m->protocal == PRI_PROTO_TYPE) {
             q921_pick_frame(m);
         } else if (m->protocal == SS7_PROTO_TYPE) {
             mtp2_pick_frame(m);
+            if (m->tx_len > 64) {
+                LOG_D("E1 '%d' m->tx_len=%d", m->e1_no, m->tx_len);
+                LOG_HEX("tx", 16, m->tx_buffer, 16);
+            }
+            
         } else {
             return;
         }
@@ -993,8 +1027,11 @@ void send_ccs_msg(u8_t e1_no, u8_t send_len)
 
     if (m->tx_len > send_len) {
         ds26518_tx_set(e1_no, m->tx_buffer, send_len, 0);
+        LOG_W("e1 '%d' m->tx_len = %d, send_len = %d, maybe too long to go to error.", e1_no, m->tx_len, send_len);
+        //check_memory();
+        //LOG_HEX("tx_buf", 16, m->tx_buffer, 32);
         m->tx_len -= send_len;
-
+        
         for(u8_t i = 0; i < m->tx_len; i++) {
             m->tx_buffer[i] = m->tx_buffer[i + send_len];
         }
@@ -1006,6 +1043,8 @@ void send_ccs_msg(u8_t e1_no, u8_t send_len)
 
 void rv_ccs_byte(u8_t e1_no, u8_t data)
 {
+    e1_no = e1_no & 7;
+
     mtp2_t *m = &mtp2_state[e1_no];
 
     m->rx_buf[m->rx_len++] = data;
@@ -1013,15 +1052,18 @@ void rv_ccs_byte(u8_t e1_no, u8_t data)
 
 void check_ccs_msg(u8_t e1_no)
 {
+    e1_no = e1_no & 7;
+
     mtp2_t *m = &mtp2_state[e1_no];
 
-    if (m->protocal == SS7_PROTO_TYPE) {
-        /* Delete CRC16 2 byte */
-        mtp2_read_su(m, m->rx_buf, m->rx_len -2);
-    } else if (m->protocal == PRI_PROTO_TYPE) {
-        q921_receive(m, (q921_h *)m->rx_buf, m->rx_len - 2);
+    /* Delete CRC16 2 byte */
+    if (m->rx_len > 2) {
+        if (m->protocal == SS7_PROTO_TYPE) {
+            mtp2_read_su(m, m->rx_buf, m->rx_len -2);
+        } else if (m->protocal == PRI_PROTO_TYPE) {
+            q921_receive(m, (q921_h *)m->rx_buf, m->rx_len - 2);
+        }
     }
-
     m->rx_len = 0;
 }
 
@@ -1029,6 +1071,8 @@ void bad_msg_rev(u8_t e1_no, u8_t err)
 {
     static u16_t error_count[8] = {0};
     
+    e1_no = e1_no & 7;
+
     mtp2_t *m = &mtp2_state[e1_no];
 
     m->rx_len = 0;
@@ -1039,22 +1083,17 @@ void bad_msg_rev(u8_t e1_no, u8_t err)
      4: Overrun.
     */
    error_count[e1_no] ++;
-   if (error_count[e1_no] > 300) {
-       LOG_E("%d E1 Receive errors, count=%d", e1_no, error_count[e1_no]);
+   if (error_count[e1_no] > 5000) {
+       LOG_W("%d E1 Receive errors, count=%d", e1_no, error_count[e1_no]);
        error_count[e1_no] = 0;
-       //e1_port_init(e1_no);
-       //disable_e1_transmit(e1_no);
-       if (m->protocal == SS7_PROTO_TYPE) {
-           m->state = MTP2_DOWN;
-       } else if (m->protocal == PRI_PROTO_TYPE) {
-           m->q921_state = Q921_TEI_UNASSIGNED;
-       }
    }
    
 }
 
 u8_t read_l2_status(int e1_no)
 {
+    e1_no = e1_no & 7;
+
     mtp2_t *m = &mtp2_state[e1_no];
 
     if (m->protocal == NO1_PROTO_TYPE) {
@@ -1072,3 +1111,27 @@ u8_t read_l2_status(int e1_no)
     return 0;
 }
 
+void init_mtp2_mem(void)
+{
+    memset((void*)&mtp2_state[0], 0, sizeof(mtp2_t)*E1_LINKS_MAX);
+}
+
+void check_memory(void)
+{
+    mtp2_t *mtp2_array[E1_PORT_PER_CARD];
+
+    int tx_len[E1_PORT_PER_CARD];
+
+    for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+        mtp2_array[i] = &mtp2_state[i];
+        tx_len[i] = mtp2_array[i]->tx_len;           
+    }
+
+    LOG_W("Now check mtp2 struct memory status:-----");
+    LOG_D(" 8 mtp2 struct size = 0x%04X, first point address=%p", sizeof(mtp2_t) * 8, mtp2_array[0]);
+    LOG_D("1 adress = %p, 2 address = %p, 3 address = %p, 4 address = %p", mtp2_array[1], mtp2_array[2], mtp2_array[3], mtp2_array[4]);
+    LOG_D("5 address = %p, 6 address = %p, 7 address = %p", mtp2_array[5], mtp2_array[6], mtp2_array[7]);
+
+    LOG_W("tx_len = %d\t%d\t%d\t%d\t%d\t%d\t%d\t%d", tx_len[0], tx_len[1], tx_len[2], tx_len[3],
+                tx_len[4], tx_len[5], tx_len[6], tx_len[7]);
+}

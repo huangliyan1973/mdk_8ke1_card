@@ -42,32 +42,133 @@
 
 #define ZL_DEV (struct zl50020_dev *)ZL50020_BASE
 #define ZL_CML (struct zl50020_cml *)ZL50020_CML_ADDR
+/** FOR V3.61 
+#define PCM_BUS_START_STREAM         16
+#define MODULE_START_STREAM         24
+#define TONE_START_SLOT         0
+#define CONF_START_SLOT         32
+#define MFC_START_SLOT          64
+**/
 
-//#define IBO_ENABLE
+/* FOR V3.1 */
+#define PCM_BUS_START_STREAM         11
+#define MODULE_START_STREAM         12
+
+#define TONE_START_SLOT             96
+#define CONF_START_SLOT             64
+#define MFC_START_SLOT              96
+
+
+//#define ZL50020_16M_CONNECTION
 
 extern u8_t card_id;
 
 static int zl50020_inited = 0;
 
-void zl50020_connect_memory_init(u8_t stream_no)
+void zl50020_connect_memory_init(void)
 {
-    #if 0
-    for(int i = 0; i < 31; i++) {
-        u16_t *cml = (u16_t *)CML_STO_ADDR(i);
-        for(int j = 0; j < 256; j++) {
-            *(cml + j) = (2 << 9) | (0 << 1);
+    struct zl50020_cml *cml = ZL_CML;
+    u8_t start_stream = /*card_id*2 + */ PCM_BUS_START_STREAM;
+    u8_t o_stream, o_ts;
+
+    for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+        for(int slot = 0; slot < MAX_E1_TIMESLOTS; slot++) {
+            o_stream = start_stream + i/4;
+            o_ts = ((i << 5) + slot) & 0x7f;
+            cml->sto_connect[o_stream][o_ts] = (i << 9) | (slot << 1);
+            LOG_I("con: 0x%x[%x] <-- 0x%x[%x]\t[%p] = %x", 
+                o_ts, o_stream, slot, i,
+                &cml->sto_connect[o_stream][o_ts], 
+                cml->sto_connect[o_stream][o_ts]);
+        }
+        LOG_D("--------------------------------------------------------");
+    }
+
+    LOG_D("------------------------------TONE------------------------");
+    if (card_id == 0) {
+        for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
+            cml->sto_connect[MODULE_START_STREAM][i + TONE_START_SLOT] = (TONE_STREAM << 9) | (i << 1);
+            LOG_I("con: 0x%x[%x] <-- 0x%x[%x] [%p] = %x", 
+                i + TONE_START_SLOT, MODULE_START_STREAM, i, TONE_STREAM,
+                &cml->sto_connect[MODULE_START_STREAM][i + TONE_START_SLOT], 
+                cml->sto_connect[MODULE_START_STREAM][i + TONE_START_SLOT]);
+        }        
+    }
+
+    LOG_D("------------------------------CONF-------------------------");
+    if (ram_params.conf_module_installed) {
+        for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
+            cml->sto_connect[MODULE_START_STREAM][i+CONF_START_SLOT] = (CONF_STREAM << 9) | (i << 1);
+            LOG_I("con: 0x%x[%x] <-- 0x%x[%x] [%p] = %x", 
+                i + CONF_START_SLOT, MODULE_START_STREAM, i, CONF_STREAM,
+                &cml->sto_connect[MODULE_START_STREAM][i + CONF_START_SLOT], 
+                cml->sto_connect[MODULE_START_STREAM][i + CONF_START_SLOT]);
         }
     }
-    #endif
-    u16_t *cml = (u16_t *)CML_STO_ADDR(stream_no);
-    for (int i = 0; i < 32; i++) {
-        *(cml + i) = (TONE_STREAM << 9);
+
+/**
+ *  MFC only need listen(input), not output.
+    if (ram_params.mfc_module_installed) {
+        for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
+            cml->sto_connect[MODULE_START_STREAM][i+64] = (MFC_STREAM << 9) | (i << 1);
+        }
+    }
+**/
+}
+
+void zl50020_connect_memory_16m_init(void)
+{
+    struct zl50020_cml *cml = ZL_CML;
+    u8_t start_stream = card_id + PCM_BUS_START_STREAM;
+    u8_t o_stream, o_ts;
+
+    for (int i = 0; i < E1_PORT_PER_CARD; i++) {
+        for (int slot = 0; slot < MAX_E1_TIMESLOTS; slot++) {
+            o_stream = start_stream;
+            o_ts = (i << 5) + slot;
+            cml->sto_connect[o_stream][o_ts] = (i << 9) | (slot << 1);
+            LOG_I("con: 0x%x[%x] <-- 0x%x[%x] [%p] = %x", 
+                o_ts, o_stream, slot, i,
+                &cml->sto_connect[o_stream][o_ts], 
+                cml->sto_connect[o_stream][o_ts]);
+        }
+        LOG_D("----------------------------------------");
+    }
+
+    LOG_D("-----------------TONE-------------------------");
+    if (card_id == 0) {
+        for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
+            cml->sto_connect[MODULE_START_STREAM][i] = (TONE_STREAM << 9) | (i << 1);
+            LOG_I("con: 0x%x[%x] <-- 0x%x[%x] [%p] = %x", 
+                i, MODULE_START_STREAM, i, TONE_STREAM,
+                &cml->sto_connect[MODULE_START_STREAM][i], 
+                cml->sto_connect[MODULE_START_STREAM][i]);
+        }        
+    }
+
+    LOG_D("-----------------CONF-------------------------");
+    if (ram_params.conf_module_installed) {
+        for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
+            cml->sto_connect[MODULE_START_STREAM][i+32] = (CONF_STREAM << 9) | (i << 1);
+        }
+    }
+
+    LOG_D("-----------------MFC-------------------------");
+    if (ram_params.mfc_module_installed) {
+        for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
+            cml->sto_connect[MODULE_START_STREAM][i+64] = (MFC_STREAM << 9) | (i << 1);
+            LOG_I("con: 0x%x[%x] <-- 0x%x[%x] [%p] = %x", 
+                i+64, MODULE_START_STREAM, i, TONE_STREAM,
+                &cml->sto_connect[MODULE_START_STREAM][i+64], 
+                cml->sto_connect[MODULE_START_STREAM][i+64]);
+        }
     }
 }
 
 void zl50020_init(void)
 {
     struct zl50020_dev *dev = ZL_DEV;
+    u16_t ims_value;
 
     /* CR
 	 * Bit 11 = 0, OPM is Divided Clock Mode.
@@ -90,14 +191,23 @@ void zl50020_init(void)
     /* Block programming enable */
     dev->cr |= 0x8;
     /*
+    * Bit 8: = 1: the pull-down resistors on all STio pads will be enabled
+     * Bit 7 = 1: STi16-31 tied low internally, STio16-31 are bi-directiona
 	 * Bit3-1: 000, BPD
 	 * Bit0: MBPS = 0;
 	 */
-    //dev->ims = 0;
-    dev->ims = 1;
-    HAL_Delay(5);
+    if (!(card_id & 0xf)) {
+        ims_value = 0x0;
+    } else {
+        ims_value = 0x0;
+    }
+    dev->ims = ims_value; 
+    HAL_Delay(2);
+    dev->ims = ims_value | 1;
+
+    HAL_Delay(2);
     LOG_W("dev->ims=%x", dev->ims);
-    while (dev->ims != 0);
+    while (dev->ims != ims_value);
 	
     /* disable block programming */
     dev->cr &= ~(0x8);
@@ -112,19 +222,45 @@ void zl50020_init(void)
         dev->sicr[i] = 0x1; //2.048M for E1 port;
         dev->socr[i] = 0x1;
     }
-    
+
     dev->sicr[8] = dev->socr[8] = 0x1; // 2.048M for TONE32 Module.
     dev->sicr[9] = dev->socr[9] = 0x1; // 2.048M for MFC Module.
     dev->sicr[10] = dev->socr[10] = 0x1; // 2.048M for CONF Module.
 
- 
+
+
+#ifdef ZL50020_16M_CONNECTION
+    for (int i = 16; i < 20; i++) {
+        dev->sicr[i] = 0x4;
+        dev->socr[i] = 0x4;
+    }
+    dev->sicr[MODULE_START_STREAM] = 0X4;
+    dev->socr[MODULE_START_STREAM] = 0x4;
+
+    zl50020_connect_memory_16m_init();
+#else
+    /* STio16 - STio23 for Cards exchange, 8.096M PCM 
+     * STio24 for module slot, 0-31 Tone, 32-63 conf, 64 - 95 mfc_in 
+    */
+    for(int i = PCM_BUS_START_STREAM; i < PCM_BUS_START_STREAM + 8; i++) {
+        dev->sicr[i] = 0x3;
+        dev->socr[i] = 0x3;
+    }
+    dev->sicr[MODULE_START_STREAM] = 0X3;
+    dev->socr[MODULE_START_STREAM] = 0x3;
+
+    zl50020_connect_memory_init();
+#endif 
+
     LOG_D("ZL500020 REGISTER:");
-    LOG_D("CR = %X, IMS=%x, SRR=%X, OCFCR=%X",dev->cr, dev->ims, dev->srr, dev->ocfcr);
-    LOG_D("SICR1 = %X, SOCR1=%X, SICR8=%X, SOCR8=%X",
-        dev->sicr[0], dev->socr[0], dev->sicr[8], dev->socr[8]);
+    LOG_D("CR =%X, IMS=%x, SRR=%X, OCFCR=%X",dev->cr, dev->ims, dev->srr, dev->ocfcr);
+    LOG_D("SICR1 = %X, SOCR1=%X, SICR16=%X, SOCR16=%X",
+        dev->sicr[0], dev->socr[0], dev->sicr[PCM_BUS_START_STREAM], dev->socr[PCM_BUS_START_STREAM]);
     
-    for (int i = 0; i < 11; i++){
-        zl50020_connect_memory_init(i);
+    
+    LOG_I("ZL50020 Init finised!, IFR=%x", dev->ifr);
+    if (dev->ifr != 0) {
+        LOG_E("ZL50020 Init failed cause of maximum capacity.");
     }
 
     zl50020_inited = 1;
@@ -161,31 +297,32 @@ void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
     uint16_t i_stream, i_slot, conn_value;
     uint16_t o_slot, o_stream;
 
-    if ((i_e1 >> 3) == 0) {
-        if (i_e1 == TONE_E1) {
-            i_stream = TONE_STREAM;
-            i_slot = i_ts;
-        } else {
-            i_stream = i_e1 & 7;
-            i_slot = i_ts;
-        }       
-        //LOG_I("local card switch, i_e1 = %d, card_id=%d, i_stream=%d, i_slot=0x%x", i_e1, card_id, i_stream, i_slot);
-        
+    //LOG_D("Connect slot o_ts[o_e1] = %x[%x] , i_ts[i_e1]=%x[%x]", o_ts,o_e1, i_ts,i_e1);
+    if (i_e1 == TONE_E1) {
+        /* Listen tone */
+        i_stream = MODULE_START_STREAM;
+        i_slot = TONE_START_SLOT + i_ts;
     } else {
-        i_stream = (i_e1 >> 3) + 11;
-        i_slot = i_ts;
+#ifdef ZL50020_16M_CONNECTION
+        i_stream = (i_e1 >> 3) + PCM_BUS_START_STREAM;
+        i_slot = ((i_e1 & 0x7) << 5) + i_ts;
+#else
+        /* card_id = i_e1 >> 3;
+         *  stream = card_id * 2 + PCM_BUS_START_STREAM
+        */
+        i_stream = (i_e1 >> 2) + PCM_BUS_START_STREAM;
+        i_slot = ((i_e1 & 0x3) << 5) + i_ts;
+#endif
     }
 
-    if (o_e1 == TONE_E1) {
+    if (o_e1 == TONE_E1 && ram_params.mfc_module_installed == 1) { 
+        /* MFC Decode */
         o_stream = MFC_STREAM;
         o_slot = o_ts;
     } else {
         o_stream = o_e1;
         o_slot = o_ts;
     }
-
-    //LOG_D("o_ts --- o_e1--- i_ts--- i_e1 === o_st === i_st");
-    //LOG_D("0x%x\t0x%x\t0x%x\t0x%x\t%d\t%d", o_ts, o_e1, i_ts, i_e1,o_stream, i_stream);
     
     conn_value = (i_stream << 9) | (i_slot << 1);
   
@@ -193,7 +330,7 @@ void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
 
     cml->sto_connect[o_stream][o_slot] = conn_value;
 
-    LOG_I("Connect slot 0x%x[%d] <-- 0x%x[%d]\t[%p]=0x%x", o_slot, o_stream, i_slot, i_stream,
+    LOG_I("Connect slot 0x%x[%x] <-- 0x%x[%x]\t[%p]=0x%x", o_slot, o_stream, i_slot, i_stream,
         &cml->sto_connect[o_stream][o_slot], cml->sto_connect[o_stream][o_slot]);
 
 }
@@ -203,7 +340,7 @@ TONE_STREAM,
 CONF_STREAM,
 MFC_STREAM
 */
-void connect_tone(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_stream)
+void connect_tone(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts)
 {
     struct zl50020_dev *dev = ZL_DEV;
     struct zl50020_cml *cml = ZL_CML;
@@ -211,10 +348,10 @@ void connect_tone(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_stream
     dev->cr &= 0xFC; 
 
     //pcml[o_slot] = (i_stream << 9) | (i_ts << 1); /* BIT 8 - BIT 1 */
-    cml->sto_connect[o_e1][o_ts] = (i_stream << 9) | (i_ts << 1);
+    cml->sto_connect[o_e1][o_ts] = (MODULE_START_STREAM << 9) | ((i_ts + TONE_START_SLOT) << 1);
 
-    LOG_I("connect tone 0x%x[%d] <-- 0x%x[%d]",
-        o_ts, o_e1, i_ts, i_stream);
+    LOG_I("connect tone 0x%x[%x] <-- 0x%x[%x]",
+        o_ts, o_e1, i_ts + TONE_START_SLOT, MODULE_START_STREAM);
 }
 
 void zl50020_bitDelay(u8_t stream_no, u8_t bit_delay)
@@ -326,6 +463,7 @@ void print_zl50020(u8_t stream_no, u8_t slot)
         data[i] = cml->sto_connect[stream_no][slot];
         for (int j = 0; j < 20*16; j++) {
             dummy = dev->cr;
+            dev->cr = 0x86;
             if (dummy != 0x86) {
                 LOG_E("Error!");
             }
@@ -335,12 +473,13 @@ void print_zl50020(u8_t stream_no, u8_t slot)
     LOG_HEX("", 16, data, 200);
 }
 
-void read_zl50020_data_mem(u8_t stream_no, u8_t slot)
+void read_zl50020_data_mem(u8_t stream_no, u8_t slot, u8_t test_value)
 {
     struct zl50020_cml *cml = ZL_CML;
     struct zl50020_dev *dev = ZL_DEV;
     u8_t data[300] = {0};
     u8_t dummy;
+    u16_t err_count = 0;
 
     LOG_I("Now print '%d' stream '%d' slot data memory!", stream_no, slot);
     dev->cr = 0x86; // data memory read.
@@ -348,12 +487,20 @@ void read_zl50020_data_mem(u8_t stream_no, u8_t slot)
         data[i] = cml->sto_connect[stream_no][slot];
         for (int j = 0; j < 20*16; j++) {
             dummy = dev->cr;
+            dev->cr = 0x86;
             if (dummy != 0x86) {
-                LOG_E("Error!");
+                LOG_W(" Read Too faster !");
             }
+        }
+        if (data[i] != test_value) {
+            err_count++;
         }
     }
     dev->cr = 0x84;
+    if (err_count < 5) {
+        LOG_W("Read ZL50020 Data value is ok for test_value : %x, errs=%d", test_value, err_count);
+    }else
+        LOG_E("Read ZL50020 Data value has too err, count = %d", err_count);
     LOG_HEX("", 16, data, 300);
 }
 
@@ -582,7 +729,7 @@ void conf_module_detect(void)
         LOG_I("CONF MODULE INSTALLED!");
     } else {
         ram_params.conf_module_installed = 0;
-        LOG_E("CONF MODULE NOT INSTALLED!\n");
+        LOG_W("CONF MODULE NOT INSTALLED!\n");
     }
 }
 
@@ -592,15 +739,16 @@ void mfc_module_detect(void)
        LOG_I("MFC MODULE INSTALLED!");
         ram_params.mfc_module_installed = 1;
     } else {
-        LOG_E("MFC MODULE NOT INSTALLED!\n");
+        LOG_W("MFC MODULE NOT INSTALLED!\n");
         ram_params.mfc_module_installed = 0;
     }
 }
 
 void mfc_t32_zl50020_test(u8_t test_value)
 {
+    int test_ok = 1;
     /* t32负责放A1-A7， mfc负责解码，zl50020负责连接时隙 */
-    if (zl50020_inited == 0) {
+    if (!zl50020_inited) {
         zl50020_init();
     }
 
@@ -609,10 +757,19 @@ void mfc_t32_zl50020_test(u8_t test_value)
         connect_slot(i, TONE_E1, test_value, TONE_E1);
         HAL_Delay(100);
         u8_t read_value = read_dtmf(i);
-        LOG_W("--write\tread");
-        LOG_W("--%x\t%x\t%x\t%x", test_value, read_value, read_dtmf(i), read_dtmf(i));
+        LOG_W("write=%x\tread=%x", test_value, read_value);
+        if (test_value != (read_value & 0xf)) {
+            LOG_E("MFC decode ERROR on %x-->%x", test_value, read_value);
+            test_ok = 0;
+        }
     }
-    //LOG_I("TEST PASS!");
+
+    if (test_ok) {
+        LOG_I("MFC DECODE TEST PASS!");
+    } else {
+        LOG_E("MFC DECODE TEST FAILED!!!!");
+    }
+   
 }
 
 u8_t get_card_id(void)
@@ -633,12 +790,9 @@ void set_card_e1_led(void)
     if (l1_alarm != ram_params.e1_l1_alarm || l2_alarm != ram_params.e1_l2_alarm) {
         l2_alarm = ram_params.e1_l2_alarm;
         l1_alarm = ram_params.e1_l1_alarm;
-        /*
-        LOG_W("update led: l1_alarm = %x", l1_alarm);
-        LOG_W("update led: l2_alarm = %x", l2_alarm);
-        LOG_W("update led: e1_enable = %x, l2_alarm_enable=%x", 
-            e1_params.e1_enable[card_id & 0xF], e1_params.e1_l2_alarm_enable[card_id & 0xF]);
-        */
+        
+        //LOG_W("update led: l1_alarm = %x, back_value = %x", l1_alarm, ~l1_alarm);
+        //LOG_W("update led: l2_alarm = %x, back_value = %x", l2_alarm, ~l2_alarm);        
     }
 }
 
@@ -654,8 +808,13 @@ void test_e1_led(u8_t red, u8_t green)
 void zl50020_test(void)
 {
     struct zl50020_dev *dev = ZL_DEV;
+    //struct zl50020_cml *cml = ZL_CML;
+    u8_t o_stream ;
+    u8_t idle_code, test_e1, test_slot;
 
-    zl50020_init();
+    if (!zl50020_inited) {
+        zl50020_init();
+    }
 
     u16_t data = dev->sicr[0];
     if (dev->sicr[0] != 0x1) {
@@ -674,11 +833,48 @@ void zl50020_test(void)
         goto fault;
     }
 
+#ifdef ZL50020_16M_CONNECTION
+    if (dev->sicr[16] != 0x4 || dev->socr[16] != 0x4) {
+        goto fault;
+    }
+#else
+    if (dev->sicr[16] != 0x3 || dev->socr[16] != 0x3) {
+        goto fault;
+    }
+#endif
     dev->ocfcr = 0x1cf;
 
     if (dev->ocfcr != 0x1cf) {
         goto fault;
     }
+
+    
+    //cml->sto_connect[16][1] = 1 << 1;
+    idle_code = 0x57;
+    test_e1 = 0;
+    test_slot = 1;
+    LOG_I("Now test ZL50020 and DS26518 slot connection, test_slot = %d, test_e1=%d, idle_code=%x",
+        test_slot, test_e1, idle_code);
+    ds26518_set_idle_code(test_e1,test_slot, idle_code, 1);
+
+    set_ds26518_loopback(0, FRAME_LOCAL_LP);
+    LOG_D("After Loopback on e1, e1 tx ==> rx, so, read zl50020 data memory , should be=%x", idle_code);
+#ifdef ZL50020_16M_CONNECTION
+    o_stream = card_id + PCM_BUS_START_STREAM;
+#else
+    o_stream = card_id*2 + PCM_BUS_START_STREAM;
+#endif
+    LOG_I("First test local stream, stream no = %d, slot=%d", test_e1, test_slot);
+    HAL_Delay(2);
+    read_zl50020_data_mem(test_e1, test_slot, idle_code);
+    LOG_I("Then test PCM bus, stream no = %d, slot = %d", o_stream, test_slot);
+    HAL_Delay(2);
+    read_zl50020_data_mem(o_stream, test_slot, idle_code);
+    
+    /*Close test, and reset idle code and loopback */
+    ds26518_set_idle_code(test_e1,test_slot, 0x37,0);
+    set_ds26518_loopback(0, NO_LP);
+    
     LOG_I("ZL50020 TEST OK!");
 	return;
 

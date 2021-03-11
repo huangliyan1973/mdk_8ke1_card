@@ -86,7 +86,7 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
             break;
         case CON_TONE:
             ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);
-            connect_tone(src_slot, src_port, VOICE_450HZ_TONE, TONE_STREAM);
+            connect_tone(src_slot, src_port, VOICE_450HZ_TONE);
             toneno = e1_params.reason_to_tone[ot_msg->tone_no & 0x0F] & 0xF; /* tone0, tone1,...tone7 */
             slot_params[ot_msg->src_slot].connect_tone_flag = (toneno << 4) + 1;
             slot_params[ot_msg->src_slot].dmodule_ctone = ot_msg->dst_id; /* destination module when connect tone */
@@ -230,6 +230,21 @@ static char *rev_mtp2_msg_name(u8_t sio)
     return "SN:<==UNKOWN";
 }
 
+static char *rev_mtp3_msg_name(u8_t sio)
+{
+    if (sio == 1 || sio == 0) {
+        return "SN:==>SNM";
+    } else if (sio == 3) {
+       return "SN:==>SCCP";
+    } else if (sio == 4) {
+        return "SN:==>TUP";
+    } else if (sio == 5) {
+        return "SN:==>ISUP";
+    }
+
+    return "SN:==>UNKOWN";
+}
+
 static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *src_addr, u16_t port)
 {
     struct server_msg *serv_msg = (struct server_msg *)p->payload;
@@ -264,10 +279,7 @@ static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *s
             break;
         default:
             if ((sio & 0xf) < 6) {
-                /* link test = 1, tup = 4, isup = 5, sccp = 3 */
-                //char *title = rev_mtp3_msg_name(sio & 0xf);
-                
-                //LOG_HEX(title, 16, (u8_t *)p->payload, p->tot_len);
+              LOG_HEX(rev_mtp3_msg_name(sio & 0xf), 16, serv_msg->msg.ss7.contents, serv_msg->msg_len-1);
 
                 mtp2_queue_msu(e1_no & 0x7, sio, serv_msg->msg.ss7.contents, serv_msg->msg_len-1);
             }
@@ -389,7 +401,7 @@ void send_other_msg(struct other_msg *msg, u8_t len)
         LOG_W("send control msg failed.\n");
     }
 
-    LOG_HEX(other_msg_type(send_msg), 16, (u8_t *)send_msg, tot_len);
+    //LOG_HEX(other_msg_type(send_msg), 16, (u8_t *)send_msg, tot_len);
     
     netbuf_delete(net_buf);
 }
@@ -576,7 +588,7 @@ void connect_tone_proc(u8_t st_slot, u8_t end_slot)
         case CONNECT_DTMF_FLAG:
             toneno = (slot_params[slot].connect_tone_flag >> 4);
             if (slot_params[slot].dtmf_mark_delay > 0) {
-                connect_tone(slot & 0x1f, slot >> 5, toneno, TONE_STREAM);
+                connect_tone(slot & 0x1f, slot >> 5, toneno);
                 slot_params[slot].dtmf_mark_delay--;
             } else {
                 if (slot_params[slot].dtmf_space_delay == 0) {
@@ -588,14 +600,14 @@ void connect_tone_proc(u8_t st_slot, u8_t end_slot)
 
                     if (con_port == TONE_E1 && con_slot == TONE_SILENT) {
                         ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_INACTIVE);
-                        connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
+                        connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT);
                     } else {
                         ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_ACTIVE);
-                        connect_tone(slot & 0x1f, slot >> 5, con_slot, TONE_STREAM); //???
+                        connect_tone(slot & 0x1f, slot >> 5, con_slot); //???
                     }
                 } else {
                     ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_INACTIVE);
-                    connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT, TONE_STREAM);
+                    connect_tone(slot & 0x1f, slot >> 5, TONE_SILENT);
                     slot_params[slot].dtmf_space_delay--;
                 }
             }
@@ -816,7 +828,7 @@ void update_e1_l2_status(void)
         l2_status |= (read_l2_status(i) << i);
     }
 
-    ram_params.e1_l2_alarm = l2_status & (~(ram_params.conf_module_installed << 1));
+    ram_params.e1_l2_alarm = l2_status | (ram_params.conf_module_installed << 1);
 
     if (l2_st != l2_status) {
         LOG_W("card l2_lararm = %x, l2_status = %x", ram_params.e1_l2_alarm, l2_status);

@@ -105,7 +105,7 @@ void print_prbs_value(u8_t stream_no, int stop_flag);
 
 extern void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1);
 
-extern void connect_tone(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_stream);
+extern void connect_tone(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts);
 
 extern void m34116_conf_connect(u8_t p, u8_t gaini, u8_t ai, u8_t gaino, u8_t ao, u8_t c, u8_t s, u8_t pt);
 
@@ -135,7 +135,7 @@ extern void zl50020_bitAdvancement(u8_t stream_no, u8_t bit_adv);
 
 extern void zl50020_frac_bit_adv(u8_t stream_no);
 
-extern void read_zl50020_data_mem(u8_t stream_no, u8_t slot);
+extern void read_zl50020_data_mem(u8_t stream_no, u8_t slot, u8_t test_value);
 
 extern void print_zl50020_cml_value(u16_t stream_no, u16_t slot);
 

@@ -115,7 +115,7 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  MX_GPIO_Init();
+  MX_GPIO_Init(); 
   MX_FSMC_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
@@ -131,21 +131,17 @@ int main(void)
 
   ds26518_test();
   
+  module_test();
+  
   HAL_Delay(1000);
 
   zl50020_test();
 
-  ds26518_monitor_test(0, 0);
-  
-  //ds26518_zl50020_test(6,16,16);
-
-  //print_zl50020(5,1);
-  
+  //ds26518_monitor_test(0, 0);
+    
   init_eeprom();
 
   sram_test();
-
-  module_test();
   
   /* USER CODE END 2 */
 

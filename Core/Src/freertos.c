@@ -138,7 +138,6 @@ void StartDefaultTask(void *argument)
     
   mtp_init();
   
-  //shell_init();
   sched_timeout_init();
 
   server_interface_init();
@@ -170,6 +169,12 @@ void StartDefaultTask(void *argument)
     //print_prbs_value(5, 0);
     //ds26518_bert_report(2);
 #endif
+//    for(int i = 0; i < 8; i++){
+//        check_liu_status(i);
+//    }
+    
+    //check_memory();
+      
     osDelay(10000);
   }
   /* USER CODE END StartDefaultTask */
