@@ -1,5 +1,6 @@
 #include "main.h"
 #include "sched.h"
+#include "server_interface.h"
 
 #define LOG_TAG              "sch_timer"
 #define LOG_LVL              LOG_LVL_DBG
@@ -171,6 +172,8 @@ static void sched_timeout_thread(void *arg)
 {
     (void)arg;
 
+    static u32_t time_tick = 0;
+
     if (sys_mutex_new(&time_lock) != ERR_OK) {
         printf("mem allocate for time lock error!\n");
     }
@@ -183,6 +186,24 @@ static void sched_timeout_thread(void *arg)
     for(;;) {
         vTaskDelayUntil(&xLastWakeTime, xPeriod);
 
+        time_tick++;
+
+        if ((time_tick % 2) == 0) {
+            period_20ms_proc(NULL);
+        }
+
+        if ((time_tick % 5) == 0) {
+            period_50ms_proc(NULL);
+        }
+
+        if ((time_tick % 50) == 0) {
+            period_500ms_proc(NULL);
+        }
+
+        if ((time_tick % 1000) == 0) {
+            period_10s_proc(NULL);
+        }
+        
         sched_check_timeouts();
 
     }

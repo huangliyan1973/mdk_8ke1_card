@@ -76,22 +76,26 @@ void zl50020_connect_memory_init(void)
             o_stream = start_stream + i/4;
             o_ts = ((i << 5) + slot) & 0x7f;
             cml->sto_connect[o_stream][o_ts] = (i << 9) | (slot << 1);
+            /***
             LOG_I("con: 0x%x[%x] <-- 0x%x[%x]\t[%p] = %x", 
                 o_ts, o_stream, slot, i,
                 &cml->sto_connect[o_stream][o_ts], 
                 cml->sto_connect[o_stream][o_ts]);
+            **/
         }
-        LOG_D("--------------------------------------------------------");
+        //LOG_D("--------------------------------------------------------");
     }
 
     LOG_D("------------------------------TONE------------------------");
     if (card_id == 0) {
         for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
             cml->sto_connect[MODULE_START_STREAM][i + TONE_START_SLOT] = (TONE_STREAM << 9) | (i << 1);
+            /**
             LOG_I("con: 0x%x[%x] <-- 0x%x[%x] [%p] = %x", 
                 i + TONE_START_SLOT, MODULE_START_STREAM, i, TONE_STREAM,
                 &cml->sto_connect[MODULE_START_STREAM][i + TONE_START_SLOT], 
                 cml->sto_connect[MODULE_START_STREAM][i + TONE_START_SLOT]);
+            **/
         }        
     }
 
@@ -99,21 +103,15 @@ void zl50020_connect_memory_init(void)
     if (ram_params.conf_module_installed) {
         for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
             cml->sto_connect[MODULE_START_STREAM][i+CONF_START_SLOT] = (CONF_STREAM << 9) | (i << 1);
+            /***
             LOG_I("con: 0x%x[%x] <-- 0x%x[%x] [%p] = %x", 
                 i + CONF_START_SLOT, MODULE_START_STREAM, i, CONF_STREAM,
                 &cml->sto_connect[MODULE_START_STREAM][i + CONF_START_SLOT], 
                 cml->sto_connect[MODULE_START_STREAM][i + CONF_START_SLOT]);
+            **/
         }
     }
 
-/**
- *  MFC only need listen(input), not output.
-    if (ram_params.mfc_module_installed) {
-        for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
-            cml->sto_connect[MODULE_START_STREAM][i+64] = (MFC_STREAM << 9) | (i << 1);
-        }
-    }
-**/
 }
 
 void zl50020_connect_memory_16m_init(void)
@@ -848,8 +846,6 @@ void zl50020_test(void)
         goto fault;
     }
 
-    
-    //cml->sto_connect[16][1] = 1 << 1;
     idle_code = 0x57;
     test_e1 = 0;
     test_slot = 1;
@@ -889,26 +885,26 @@ void led_test(void)
 	
     LED1_GREEN_ON;
     LED2_GREEN_ON;
-    HAL_Delay(1000);
+    HAL_Delay(800);
     LED1_RED_ON;
     LED2_RED_ON;
-    HAL_Delay(1000);
+    HAL_Delay(800);
     LED1_ORG_ON;
     LED2_ORG_ON;
-    HAL_Delay(1000);
+    HAL_Delay(800);
     LED1_OFF;
     LED2_OFF;
 	
-	HAL_Delay(1000);
+	HAL_Delay(800);
 	*led_green = 0xff;
 	*led_red = 0;
-    HAL_Delay(1000);
+    HAL_Delay(800);
     *led_green = 0x0;
 	*led_red = 0xff;
-    HAL_Delay(1000);
+    HAL_Delay(800);
     *led_green = 0xff;
 	*led_red = 0xff;
-	HAL_Delay(1000);
+	HAL_Delay(800);
     *led_green = 0;
 	*led_red = 0;
 }

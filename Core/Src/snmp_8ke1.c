@@ -748,7 +748,7 @@ static void snmp_netconn_thread(void *arg)
 
   snmp_8ke1_traps_handle = conn;
     
-  period_10s_proc(NULL);
+  //period_10s_proc(NULL);
   LOG_I("SNMP thread start!");
     
   do {

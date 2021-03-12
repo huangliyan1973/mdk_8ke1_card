@@ -315,15 +315,15 @@ const u8_t *tone_pat[] = {
 };
 
 
-static u8_t tone_count[MAX_E1_TIMESLOTS * E1_PORT_PER_CARD];
+//static u8_t tone_count[MAX_E1_TIMESLOTS * E1_PORT_PER_CARD];
 
 void tone_rt(u8_t slot)
 {
     u8_t t_on_off;
     u8_t tone_id = (slot_params[slot].connect_tone_flag >> 4) & 0x7;
     
-    u8_t t_count = tone_count[slot];
-    tone_count[slot] = (t_count + 1) % tycle_max[tone_id & 0xF];
+    u8_t t_count = slot_params[slot].tone_count;
+    slot_params[slot].tone_count = (t_count + 1) % tycle_max[tone_id & 0xF];
 
     t_on_off = *(tone_pat[tone_id & 0xf] + t_count);
 

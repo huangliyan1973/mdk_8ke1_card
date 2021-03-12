@@ -128,6 +128,8 @@ int main(void)
   printf("\n\n>>>>>>System run at %d frequence!<<<<<<\n", SystemCoreClock);
 
   led_test();
+  
+  sram_test();
 
   ds26518_test();
   
@@ -140,8 +142,6 @@ int main(void)
   //ds26518_monitor_test(0, 0);
     
   init_eeprom();
-
-  sram_test();
   
   /* USER CODE END 2 */
 

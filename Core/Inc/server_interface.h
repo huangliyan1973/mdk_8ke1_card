@@ -218,4 +218,12 @@ extern void init_r2_param(void);
 
 extern void init_mfc_slot(void);
 
+extern void period_50ms_proc(void *arg);
+
+extern void period_20ms_proc(void *arg);
+
+extern void period_500ms_proc(void *arg);
+
+extern void period_10s_proc(void *arg);
+
 #endif /* INC_CSU_IF_H_ */

@@ -92,6 +92,7 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
             slot_params[ot_msg->src_slot].dmodule_ctone = ot_msg->dst_id; /* destination module when connect tone */
             slot_params[ot_msg->src_slot].dslot_ctone = ot_msg->dst_slot; /* destination slot when connect tone */
             slot_params[ot_msg->src_slot].connect_time = ot_msg->playtimes * 20;
+            slot_params[ot_msg->src_slot].tone_count = 0;
             break;
         case CON_DTMF:
             toneno = ot_msg->tone_no;
@@ -320,7 +321,7 @@ void server_interface_init(void)
     //init_r2_param();
     init_mfc_slot();
     sys_thread_new("ss7_netconn", ss7_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
-    start_period_proc();
+    //start_period_proc();
     //sys_thread_new("isdn_netconn", isdn_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
     
 }
@@ -846,7 +847,7 @@ void period_50ms_proc(void *arg)
     alarm_fsm(proc);
     proc = (proc + 1) & 0xF;
 
-    sched_timeout(50, period_50ms_proc, NULL);
+    //sched_timeout(50, period_50ms_proc, NULL);
 }
 
 void period_20ms_proc(void *arg)
@@ -859,7 +860,7 @@ void period_20ms_proc(void *arg)
 
     mfc_scan();
 
-    sched_timeout(20, period_20ms_proc, NULL);
+    //sched_timeout(20, period_20ms_proc, NULL);
 }
 
 void period_500ms_proc(void *arg)
@@ -882,7 +883,7 @@ void period_500ms_proc(void *arg)
 
     set_card_e1_led();
 
-    sched_timeout(500, period_500ms_proc, NULL);
+    //sched_timeout(500, period_500ms_proc, NULL);
 }
 
 void hb_msg_init(void)
@@ -1016,9 +1017,7 @@ void period_10s_proc(void *arg)
 
     send_mtp2_trap_msg();
 
-    //ds26518_frame_status(0);
-
-    sched_timeout(10000, period_10s_proc, NULL);
+    //sched_timeout(10000, period_10s_proc, NULL);
 }
 
 void start_period_proc(void)
