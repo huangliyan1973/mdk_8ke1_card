@@ -257,6 +257,7 @@ static void start_initial_alignment(mtp2_t *m, char* reason)
 static void
 mtp2_pick_frame(mtp2_t *m)
 {
+    u32_t tick;
     switch(m->state) {
     case MTP2_DOWN:
         /* Send SIOS. */
@@ -335,11 +336,16 @@ mtp2_pick_frame(mtp2_t *m)
         }
 
         /* Send Fill-in signalling unit (FISU) if nothing else is pending. */
-        m->tx_len = 3;
-        m->tx_buffer[0] = m->send_bsn | (m->send_bib << 7);
-        m->tx_buffer[1] = m->retrans_last_sent | (m->send_fib << 7);
-        m->tx_buffer[2] = 0;      /* Length 0, meaning FISU. */
-        fisu_scount++;
+        tick = HAL_GetTick();
+        if ((tick - m->last_send_fisu) >= 20) { /* 20ms send one fisu */
+            m->tx_len = 3;
+            m->tx_buffer[0] = m->send_bsn | (m->send_bib << 7);
+            m->tx_buffer[1] = m->retrans_last_sent | (m->send_fib << 7);
+            m->tx_buffer[2] = 0;      /* Length 0, meaning FISU. */
+            fisu_scount++;
+            m->last_send_fisu = tick;
+        }
+        
         return;
 
     default:
@@ -762,9 +768,6 @@ void e1_port_init(int e1_no)
     mtp2_t *m = &mtp2_state[e1_no];
     memset((void *)m, 0, sizeof(mtp2_t));
 
-    if (e1_no == 1) {
-        LOG_W("Got card_id = %d, e1 '%d' no1_enable = %x, '>>1'=%x", card_id, e1_no, e1_params.no1_enable[0], e1_params.no1_enable[0]>>1);
-    }
     if (!CHN_NO1_PORT_ENABLE(e1_no)) {       
         prepare_init_link(e1_no);
         if (SS7_PORT_ENABLE(e1_no)) { /* ss7 */
@@ -1110,6 +1113,10 @@ u8_t read_l2_status(int e1_no)
     }
 
     if (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_MULTI_FRAME_ESTABLISHED) {
+        return 1;
+    }
+
+    if (ram_params.conf_module_installed && e1_no == CONF_E1) {
         return 1;
     }
 

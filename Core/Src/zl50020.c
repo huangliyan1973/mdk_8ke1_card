@@ -87,7 +87,7 @@ void zl50020_connect_memory_init(void)
     }
 
     LOG_D("------------------------------TONE------------------------");
-    if (card_id == 0) {
+    if ((card_id & 0x0f) == 0) {
         for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
             cml->sto_connect[MODULE_START_STREAM][i + TONE_START_SLOT] = (TONE_STREAM << 9) | (i << 1);
             /**
@@ -117,7 +117,7 @@ void zl50020_connect_memory_init(void)
 void zl50020_connect_memory_16m_init(void)
 {
     struct zl50020_cml *cml = ZL_CML;
-    u8_t start_stream = card_id + PCM_BUS_START_STREAM;
+    u8_t start_stream = (card_id & 0xf) + PCM_BUS_START_STREAM;
     u8_t o_stream, o_ts;
 
     for (int i = 0; i < E1_PORT_PER_CARD; i++) {
@@ -134,7 +134,7 @@ void zl50020_connect_memory_16m_init(void)
     }
 
     LOG_D("-----------------TONE-------------------------");
-    if (card_id == 0) {
+    if ((card_id & 0xf) == 0) {
         for (int i = 0; i < MAX_E1_TIMESLOTS; i++) {
             cml->sto_connect[MODULE_START_STREAM][i] = (TONE_STREAM << 9) | (i << 1);
             LOG_I("con: 0x%x[%x] <-- 0x%x[%x] [%p] = %x", 
@@ -300,6 +300,9 @@ void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
         /* Listen tone */
         i_stream = MODULE_START_STREAM;
         i_slot = TONE_START_SLOT + i_ts;
+    } else if (i_e1 == CONF_E1) {
+        i_stream = MODULE_START_STREAM;
+        i_slot = CONF_START_SLOT + i_ts;
     } else {
 #ifdef ZL50020_16M_CONNECTION
         i_stream = (i_e1 >> 3) + PCM_BUS_START_STREAM;
@@ -316,6 +319,9 @@ void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
     if (o_e1 == TONE_E1 && ram_params.mfc_module_installed == 1) { 
         /* MFC Decode */
         o_stream = MFC_STREAM;
+        o_slot = o_ts;
+    } else if (o_e1 == CONF_E1 && ram_params.conf_module_installed == 1) {
+        o_stream = CONF_STREAM;
         o_slot = o_ts;
     } else {
         o_stream = o_e1;
@@ -856,9 +862,9 @@ void zl50020_test(void)
     set_ds26518_loopback(0, FRAME_LOCAL_LP);
     LOG_D("After Loopback on e1, e1 tx ==> rx, so, read zl50020 data memory , should be=%x", idle_code);
 #ifdef ZL50020_16M_CONNECTION
-    o_stream = card_id + PCM_BUS_START_STREAM;
+    o_stream = (card_id & 0xf) + PCM_BUS_START_STREAM;
 #else
-    o_stream = card_id*2 + PCM_BUS_START_STREAM;
+    o_stream = (card_id & 0xf)*2 + PCM_BUS_START_STREAM;
 #endif
     LOG_I("First test local stream, stream no = %d, slot=%d", test_e1, test_slot);
     HAL_Delay(2);

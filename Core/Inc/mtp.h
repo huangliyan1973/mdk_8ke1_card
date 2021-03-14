@@ -259,6 +259,8 @@ typedef struct mtp2_state{
 
 	u16_t emergent_setup;
 
+	u32_t last_send_fisu;
+
 	/****************************ISDN PRI Part *************************/
 
 	u16_t pri_mode;

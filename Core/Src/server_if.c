@@ -1034,7 +1034,7 @@ void start_period_proc(void)
 void update_e1_enable(u8_t new_value)
 {
     u8_t mask;
-    u8_t old_value = e1_params.e1_enable[card_id];
+    u8_t old_value = e1_params.e1_enable[card_id & 0xf];
 
     for(int i = 0; i < E1_LINKS_MAX; i++) {
         mask = 1 << i;
@@ -1046,7 +1046,7 @@ void update_e1_enable(u8_t new_value)
         }
     }
 
-    e1_params.e1_enable[card_id] = new_value;
+    e1_params.e1_enable[card_id & 0xf] = new_value;
 }
 
 void init_r2_param(void)
