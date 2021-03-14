@@ -87,12 +87,17 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
         case CON_TONE:
             ds26518_e1_slot_enable(src_port, src_slot, VOICE_ACTIVE);
             connect_tone(src_slot, src_port, VOICE_450HZ_TONE);
-            toneno = e1_params.reason_to_tone[ot_msg->tone_no & 0x0F] & 0xF; /* tone0, tone1,...tone7 */
+            //toneno = e1_params.reason_to_tone[ot_msg->tone_no & 0x0F] & 0xF; /* tone0, tone1,...tone7 */
+            toneno = ot_msg->tone_no & 0xf;
             slot_params[ot_msg->src_slot].connect_tone_flag = (toneno << 4) + 1;
             slot_params[ot_msg->src_slot].dmodule_ctone = ot_msg->dst_id; /* destination module when connect tone */
             slot_params[ot_msg->src_slot].dslot_ctone = ot_msg->dst_slot; /* destination slot when connect tone */
             slot_params[ot_msg->src_slot].connect_time = ot_msg->playtimes * 20;
             slot_params[ot_msg->src_slot].tone_count = 0;
+            LOG_I("slot '%x': connect_tone_flag=%x, connect_time=%d, tone_count=%d",
+                ot_msg->src_slot, slot_params[ot_msg->src_slot].connect_tone_flag,
+                slot_params[ot_msg->src_slot].connect_time,
+                slot_params[ot_msg->src_slot].tone_count);
             break;
         case CON_DTMF:
             toneno = ot_msg->tone_no;
@@ -121,12 +126,12 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
             slot_params[ot_msg->src_slot].port_to_group = group;
             group_user[group]++;
             if (group_user[group] == 1) {
-                m34116_conf_connect((group % 10) + 1, 0, 2, 0, 0, ot_msg->src_slot, 0, 0);
+                m34116_conf_connect((group % 10) + 1, 0, 2, 0, 0, ot_msg->src_slot, 1, 0);
             } else {
                 toneno = ((group_user[group] >> 2) * 3 + 2) & 0xF;
                 src_port = (src_port >> 5) << 5;
                 for (i = src_port; i < src_port + 32; i++) {
-                    if (slot_params[ot_msg->src_slot].port_to_group == group) {
+                    if (slot_params[i].port_to_group == group) {
                         m34116_conf_connect((group % 10) + 1, 0, toneno, 1, 2, ot_msg->src_slot, 0, 0);
                     }
                 }

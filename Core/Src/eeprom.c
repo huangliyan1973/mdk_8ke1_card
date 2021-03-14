@@ -326,11 +326,28 @@ void tone_rt(u8_t slot)
     slot_params[slot].tone_count = (t_count + 1) % tycle_max[tone_id & 0xF];
 
     t_on_off = *(tone_pat[tone_id & 0xf] + t_count);
+#if 0
+    if (slot_params[slot].connect_time > 0){
+        slot_params[slot].connect_time--;
+        if (slot_params[slot].connect_time == 0) {
+            ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_INACTIVE);
+            //connect_tone()
+            slot_params[slot].connect_tone_flag = 0xf0;
+            return;
+        }
+    }
 
+    if (slot_params[slot].tone_count == 1) {
+        LOG_I("Slot 0x'%x' tone_id = %d, connect_time=%d", slot,tone_id, slot_params[slot].connect_time+1);
+        LOG_HEX("tone_pat", 10, (u8_t *)tone_pat[tone_id & 0xf], tycle_max[tone_id & 0xf]);
+    }
+#endif
     if (t_on_off == 1) {
         //connect_slot(slot & 0x1f, slot >> 5, VOICE_450HZ_TONE, TONE_E1);
         ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_ACTIVE);
     } else {
         ds26518_e1_slot_enable(slot >> 5, slot & 0x1f, VOICE_INACTIVE);
     }
+
+    
 }

@@ -9,6 +9,7 @@
 #include "sram.h"
 #include "eeprom.h"
 #include "server_interface.h"
+#include "zl50020.h"
 #include "sched.h"
 #include "mtp2_def.h"
 
@@ -179,6 +180,8 @@ static void abort_initial_alignment(mtp2_t *m)
     u8_t l1_status = (ram_params.e1_l1_alarm >> m->e1_no) & 1;
     
     if (l1_status == 0) {
+        if (m->e1_no == CONF_E1 && ram_params.conf_module_installed)
+            return;
         /* Retry the initial alignment after a small delay. */
         sched_timeout(T17_TIMEOUT, mtp2_t17_timeout, m);
         LOG_D("Aborted initial alignment on link '%d'", m->e1_no);
@@ -841,8 +844,6 @@ static void mtp_lowlevel_init(void)
 }
 
 #else
-
-#define CONF_E1         6
 
 static void mtp2_thread(void *arg)
 {

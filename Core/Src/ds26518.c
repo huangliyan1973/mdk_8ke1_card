@@ -331,10 +331,11 @@ void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 	} else {
 		f->tcice[index] |= bit_mask;
 	}
-
+/**
 	LOG_D("'%d' E1 '%d' slot set %s , tcice=%02x %02x %02x %02x",
         e1_no, slot, active == VOICE_ACTIVE ? "Enable":"Disable", 
         f->tcice[0], f->tcice[1], f->tcice[2], f->tcice[3]);
+*/
 }
 
 
