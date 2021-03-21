@@ -20,6 +20,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include "i2c.h"
 #include "lwip.h"
 #include "usart.h"
 #include "gpio.h"
@@ -49,8 +50,8 @@ uint8_t card_id;
 void check_master_clk(void)
 {
   card_id = get_card_id();
-  printf("\n\nGot Card id = %X\n", card_id);
-     
+  printf("\n\nϵͳ Card id = %X\n", card_id);
+  
   if (card_id & 0x0F) {
     /* slave clk */
     HAL_GPIO_WritePin(CLOCK_EN_GPIO_Port, CLOCK_EN_Pin, GPIO_PIN_RESET);
@@ -115,9 +116,10 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  MX_GPIO_Init(); 
+  MX_GPIO_Init();
   MX_FSMC_Init();
   MX_USART1_UART_Init();
+  MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
   HAL_Delay(1000);
 
@@ -132,6 +134,8 @@ int main(void)
   sram_test();
 
   ds26518_test();
+
+  //m34116_zl50020_test(2);
   
   module_test();
   

@@ -40,11 +40,6 @@ static sys_mbox_t mtp_mbox;
 sys_mutex_t lock_mtp_core;
 #endif
 
-static int sin_scount = 0;
-static int sin_rcount = 0;
-static int fisu_scount = 0;
-static int fisu_rcount = 0;
-
 static void abort_initial_alignment(mtp2_t *m);
 static void start_initial_alignment(mtp2_t *m, char* reason);
 
@@ -110,12 +105,12 @@ static void mtp2_send_sltm(mtp2_t *m)
 
 static void test_5s_timeout(void *arg)
 {
-    //mtp2_t *m = (mtp2_t *)arg;
-    LOG_I("send SINs=%d, received SINs=%d, send FISUs=%d, reivced FISUs=%d",
-        sin_scount, sin_rcount, fisu_scount, fisu_rcount);
-    //mtp2_send_sltm(m);
+    mtp2_t *m = (mtp2_t *)arg;
+    LOG_I("E1 '%d' send SINs=%d, received SINs=%d, send FISUs=%d, reivced FISUs=%d, miss_fisu=%d",
+        m->e1_no, m->sin_scount, m->sin_rcount, m->fisu_scount, m->fisu_rcount, m->miss_fisu_count);
 
-    //sched_timeout(50000, test_5s_timeout, m);
+    if (m->sccp_flag)
+        sched_timeout(50000, test_5s_timeout, m);
 }
 
 /* Q.703 timer T4 "proving period" - proving time before ending own initial
@@ -152,8 +147,9 @@ static void mtp2_t17_timeout(void *arg)
     mtp2_t *m = (mtp2_t *)arg;
     LOG_D("T17 timeout on link '%d'", m->e1_no);
 
-    sin_scount = 0;
-    sin_rcount = 0;
+    m->sin_scount = 0;
+    m->sin_rcount = 0;
+    m->miss_fisu_count = 0;
     start_initial_alignment(m, "t17_timeout");
 }
 
@@ -237,6 +233,7 @@ static void start_initial_alignment(mtp2_t *m, char* reason)
     m->retrans_last_sent = 0x7f;
     
     m->bsn_errors = 0;
+    m->sccp_flag = 0;
 
     if (strcmp(reason, "Emergent start!") == 0) {
         m->emergent_setup = 1;
@@ -261,6 +258,8 @@ static void
 mtp2_pick_frame(mtp2_t *m)
 {
     u32_t tick;
+    tick = HAL_GetTick();
+
     switch(m->state) {
     case MTP2_DOWN:
         /* Send SIOS. */
@@ -298,7 +297,7 @@ mtp2_pick_frame(mtp2_t *m)
         } else {
             m->tx_buffer[3] = 1;
         }        
-        sin_scount++;
+        m->sin_scount++;
 #ifdef MTP2_LSSU_DEBUG
         if (m->emergent_setup == 1)
             LOG_D("<--SIE");
@@ -311,11 +310,8 @@ mtp2_pick_frame(mtp2_t *m)
     case MTP2_INSERVICE:
         /* Frame selection. */
 
-        /* If we have something in the retransmission buffer, send it. This
-           also handles sending new MSUs, as they are simply appended to the
-           retransmit buffer. */
-        if(m->retrans_seq != -1) {
-            /* Send retransmission. */
+        if(m->retrans_seq != -1 && (tick - m->last_send_sif) > 30) {
+            
             memcpy(m->tx_buffer,
                    m->retrans_buf[m->retrans_seq].buf,
                    m->retrans_buf[m->retrans_seq].len);
@@ -335,20 +331,23 @@ mtp2_pick_frame(mtp2_t *m)
                 m->retrans_seq = MTP_NEXT_SEQ(m->retrans_seq);
             }
 
+            m->last_send_sif = tick;
             return;
         }
 
         /* Send Fill-in signalling unit (FISU) if nothing else is pending. */
-        tick = HAL_GetTick();
-        if ((tick - m->last_send_fisu) >= 20) { /* 20ms send one fisu */
+        
+        if (m->sccp_flag == 0 ||(m->sccp_flag == 1 && (tick - m->last_send_fisu) > 33)) {
             m->tx_len = 3;
             m->tx_buffer[0] = m->send_bsn | (m->send_bib << 7);
             m->tx_buffer[1] = m->retrans_last_sent | (m->send_fib << 7);
             m->tx_buffer[2] = 0;      /* Length 0, meaning FISU. */
-            fisu_scount++;
+            m->fisu_scount++;
             m->last_send_fisu = tick;
+        } else {
+            m->miss_fisu_count++;
         }
-        
+
         return;
 
     default:
@@ -448,7 +447,7 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
         m->send_bsn = fsn;
         m->send_bib = fib;
 
-        sin_rcount++;
+        m->sin_rcount++;
 
         if (typ == 1) {
             m->emergent_setup = 0;
@@ -538,6 +537,7 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
 {
     int fsn, fib, bsn, bib;
     int li;
+    u8_t magic_src_dpc[3];
 
     if (m->state == MTP2_DOWN) {
         return;
@@ -651,7 +651,7 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
                 m->send_bib = !m->send_bib;
             }
         }
-        fisu_rcount++;
+        m->fisu_rcount++;
     } else {
         /* Message signal unit. */
         /* Process the FSN of the received frame. */
@@ -710,9 +710,32 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
         //LOG_HEX("mtp2", 16, &buf[3], len-3);
         u8_t sio = buf[3] & 0xf;
         if (sio == 0 || sio == 1 || sio == 3 || sio == 4 || sio == 5) {
+            if (e1_params.pc_magic[m->e1_no].type == 2) {
+                /* 24 bit point code exchange */
+                magic_src_dpc[0] = e1_params.pc_magic[m->e1_no].pc1[2];
+                magic_src_dpc[1] = e1_params.pc_magic[m->e1_no].pc1[1];
+                magic_src_dpc[2] = e1_params.pc_magic[m->e1_no].pc1[0];
+
+                if (magic_src_dpc[0] == buf[4] &&
+                    magic_src_dpc[1] == buf[5] &&
+                    magic_src_dpc[2] == buf[6] ) {
+                    buf[4] = e1_params.pc_magic[m->e1_no].pc2[2];
+                    buf[5] = e1_params.pc_magic[m->e1_no].pc2[1];
+                    buf[6] = e1_params.pc_magic[m->e1_no].pc2[0];
+
+                    LOG_I("E1 '%d' dpc : %x-%x-%x", m->e1_no, e1_params.pc_magic[m->e1_no].pc1[2],
+                        e1_params.pc_magic[m->e1_no].pc1[1],e1_params.pc_magic[m->e1_no].pc1[0]);
+                }
+
+            }
             send_ss7_msg(m->e1_no, &buf[3], len - 3);
+
+            if (sio == 3) {
+                m->sccp_flag = 1; /* EAN need to delay fisu speed */
+            }
         } else {
-            LOG_HEX("Error Msg", 16, &buf[3], len-3);
+            LOG_W("Receive Error Mtp2 message! on link '%d'", m->e1_no);
+            LOG_HEX("Error Msg", 16, &buf[3], 16);
         }
         
     }
@@ -755,6 +778,39 @@ static void prepare_init_link(int e1_no)
 
     /* for pri */
     m->sapi = m->tei = 0;
+
+    /* for test */
+    m->sin_scount = 0;
+    m->sin_rcount = 0;
+    m->fisu_scount = 0;
+    m->fisu_rcount = 0;
+}
+
+static char* get_protocal(u8_t protocal)
+{
+    switch (protocal) {
+        case SS7_PROTO_TYPE:
+            return "SS7";
+        case PRI_PROTO_TYPE:
+            return "ISDN";
+        case NO1_PROTO_TYPE:
+            return "CHINA-No.1";
+        default:
+            return "UNKNOWN";
+    }
+}
+
+static char* get_isdn_type(u8_t type)
+{
+    switch (type)
+    {
+        case PRI_NETWORK:
+            return "NT";
+        case PRI_CPE:
+            return "LT";
+        default:
+            return "UNKOWN";
+    }
 }
 
 void e1_port_init(int e1_no) 
@@ -775,25 +831,26 @@ void e1_port_init(int e1_no)
         prepare_init_link(e1_no);
         if (SS7_PORT_ENABLE(e1_no)) { /* ss7 */
             m->protocal = SS7_PROTO_TYPE;
-            LOG_W("link '%d' start ss7 init", e1_no);
+            LOG_I("link '%d' start ss7 init", e1_no);
             ds26518_port_init(e1_no, CCS_TYPE);
             start_initial_alignment(m, "Initial");
         } else {  /* ISDN PRI */
             m->protocal = PRI_PROTO_TYPE;
             m->pri_mode = PRI_NETWORK_ENABLE(e1_no) ? PRI_NETWORK : PRI_CPE;
-            LOG_W("link '%d' start isdn init", e1_no);
+            LOG_I("link '%d' start isdn init, pri mode is %s", e1_no, m->pri_mode == PRI_NETWORK ? "NT" : "LT");
             ds26518_port_init(e1_no, CCS_TYPE);
             q921_start(m);
         }
     } else { /* china no.1 */
-        LOG_W("link '%d' start china-no1 init", e1_no);
+        LOG_I("link '%d' start china-no1 init", e1_no);
         ds26518_port_init(e1_no, CAS_TYPE);
         m->protocal = NO1_PROTO_TYPE;
     }
 
     m->init_down = 1;
 
-    LOG_D("link '%d' protocal = %d, pri_mode = %d", e1_no, m->protocal, m->pri_mode);
+    LOG_I("link '%d' protocal : %s, pri_mode : %s", e1_no, 
+    get_protocal(m->protocal), get_isdn_type(m->pri_mode));
     
 }
 

@@ -1,4 +1,13 @@
-/** All rights reserved.</center></h2>
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * File Name          : freertos.c
+  * Description        : Code for freertos applications
+  ******************************************************************************
+  * @attention
+  *
+  * <h2><center>&copy; Copyright (c) 2021 STMicroelectronics.
+  * All rights reserved.</center></h2>
   *
   * This software component is licensed by ST under Ultimate Liberty license
   * SLA0044, the "License"; You may not use this file except in compliance with
@@ -36,7 +45,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+static u32_t last_update_eeprom;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -144,6 +153,7 @@ void StartDefaultTask(void *argument)
 
   snmp_8ke1_init();
 
+  last_update_eeprom = HAL_GetTick();
 #ifdef BERT_TEST
   //enable_prbs_function(5);
   //ds26518_enable_bert(2,1);
@@ -175,7 +185,13 @@ void StartDefaultTask(void *argument)
     
     //check_memory();
       
-    osDelay(10000);
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    /* need update eeprom */
+//    if ((HAL_GetTick() - last_update_eeprom) > 5000) {
+       update_eeprom();
+       last_update_eeprom = HAL_GetTick();
+//    }
+
   }
   /* USER CODE END StartDefaultTask */
 }

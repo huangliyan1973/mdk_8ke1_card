@@ -141,6 +141,8 @@ extern void print_zl50020_cml_value(u16_t stream_no, u16_t slot);
 
 extern void print_zl50020(u8_t stream_no, u8_t slot);
 
-extern void mfc_t32_zl50020_test(u8_t test_value);
+extern u8_t mfc_t32_zl50020_test(u8_t test_value);
+
+extern void m34116_zl50020_test(u8_t slot);
 
 #endif /* INC_ZL50020_H_ */

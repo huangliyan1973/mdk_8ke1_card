@@ -38,8 +38,6 @@
 #define E1_GREEN_LED_ADDR       (MODULE_BASE + LED_GREEN_OFFSET)
 #define E1_RED_LED_ADDR         (MODULE_BASE + LED_RED_OFFSET)
 
-#define CONF_C_ADDR     (CONF_ADDR + 1)
-
 #define ZL_DEV (struct zl50020_dev *)ZL50020_BASE
 #define ZL_CML (struct zl50020_cml *)ZL50020_CML_ADDR
 /** FOR V3.61 
@@ -51,8 +49,8 @@
 **/
 
 /* FOR V3.1 */
-#define PCM_BUS_START_STREAM         11
-#define MODULE_START_STREAM         12
+#define PCM_BUS_START_STREAM         12
+#define MODULE_START_STREAM         13
 
 #define TONE_START_SLOT             96
 #define CONF_START_SLOT             64
@@ -68,7 +66,7 @@ static int zl50020_inited = 0;
 void zl50020_connect_memory_init(void)
 {
     struct zl50020_cml *cml = ZL_CML;
-    u8_t start_stream = /*card_id*2 + */ PCM_BUS_START_STREAM;
+    u8_t start_stream = PCM_BUS_START_STREAM;
     u8_t o_stream, o_ts;
 
     for(int i = 0; i < E1_PORT_PER_CARD; i++) {
@@ -237,22 +235,20 @@ void zl50020_init(void)
 
     zl50020_connect_memory_16m_init();
 #else
-    /* STio16 - STio23 for Cards exchange, 8.096M PCM 
+    /* STio12 - STio19 for Cards exchange, 8.096M PCM 
      * STio24 for module slot, 0-31 Tone, 32-63 conf, 64 - 95 mfc_in 
     */
     for(int i = PCM_BUS_START_STREAM; i < PCM_BUS_START_STREAM + 8; i++) {
         dev->sicr[i] = 0x3;
         dev->socr[i] = 0x3;
     }
-    dev->sicr[MODULE_START_STREAM] = 0X3;
-    dev->socr[MODULE_START_STREAM] = 0x3;
-
+    
     zl50020_connect_memory_init();
 #endif 
 
     LOG_D("ZL500020 REGISTER:");
     LOG_D("CR =%X, IMS=%x, SRR=%X, OCFCR=%X",dev->cr, dev->ims, dev->srr, dev->ocfcr);
-    LOG_D("SICR1 = %X, SOCR1=%X, SICR16=%X, SOCR16=%X",
+    LOG_D("SICR1 = %X, SOCR1=%X, SICR12=%X, SOCR12=%X",
         dev->sicr[0], dev->socr[0], dev->sicr[PCM_BUS_START_STREAM], dev->socr[PCM_BUS_START_STREAM]);
     
     
@@ -300,7 +296,7 @@ void connect_slot(uint16_t o_ts, uint16_t o_e1, uint16_t i_ts, uint16_t i_e1)
         /* Listen tone */
         i_stream = MODULE_START_STREAM;
         i_slot = TONE_START_SLOT + i_ts;
-    } else if (i_e1 == CONF_E1) {
+    } else if (i_e1 == CONF_E1) {        
         i_stream = MODULE_START_STREAM;
         i_slot = CONF_START_SLOT + i_ts;
     } else {
@@ -661,60 +657,167 @@ void test_prbs(void)
 */   
 }
 
-void m34116_mode(void)
+#define CONF_C_ADDR     (CONF_ADDR + 1)
+#define CONF_DATA       *((u8_t *)(CONF_ADDR))
+#define CONF_CONTROL    *((u8_t *)CONF_C_ADDR)
+
+static void delay_us(int c)
 {
-    u8_t *control = (u8_t *)CONF_C_ADDR;
-    *control = 0x19; 
-}
-
-void m34116_disconnect(u8_t slot)
-{
-    u8_t *data = (u8_t *)CONF_ADDR;
-    *data = slot;
-
-    *(data + 1) = 0xF;
-}
-
-void m34116_conf_connect(u8_t p, u8_t gaini, u8_t ai, u8_t gaino, u8_t ao, u8_t c, u8_t s, u8_t pt)
-{
-    u8_t *reg = (u8_t *)CONF_ADDR;
-
-    c = c & 0x1F;
-    
-    if (s == 1) {
-        p += 32;
+    if (c < 0)
+        return;
+    while(c) {
+        for(int i = 0; i < c; i++) {
+            c--;
+            c++;
+        }
+        c--;
     }
-    *reg = p;
-
-    if (gaini == 1) {
-        ai += 16;
-    }
-    *reg = ai;
-
-    if (gaino == 1) {
-        ao += 16;
-    }
-    *reg = ao;
-
-    if (pt == 1) {
-        c += 64;
-    }
-    *reg = c;
-
-    *(reg + 1) = 0x7;
 }
 
 u8_t m34116_status(u8_t slot)
 {
-    u8_t *reg = (u8_t *)CONF_ADDR;
+    CONF_DATA = slot & 0x1F;
+    delay_us(100);
+    CONF_CONTROL = 0x6;
+    delay_us(100);
     
-    LOG_I("conf data = %x", *reg);
+    return CONF_DATA;
+}
 
-    *reg = slot & 0x1F;
-    *(reg + 1) = 0x6;
+u8_t m34116_other_status(void)
+{
+    delay_us(100);
+    return CONF_DATA;
+}
 
-    LOG_I("after set, conf data = %x, data1=%x", *reg, *(reg+1));
-    return (*reg);
+void m34116_mode(void)
+{
+    CONF_CONTROL = 0x19; 
+    HAL_Delay(2);
+}
+
+void m34116_disconnect(u8_t slot)
+{
+    //delay_us(100);
+    CONF_DATA = slot & 0x1f;
+    delay_us(100);
+    CONF_CONTROL = 0xf;
+    delay_us(100);
+
+    LOG_I("m34116 '%x' slot dismiss conference, register value=%x", slot, m34116_status(slot));
+
+}
+
+void m34116_conf_connect(u8_t p, u8_t gaini, u8_t ai, u8_t gaino, u8_t ao, u8_t c, u8_t s, u8_t pt)
+{
+    u8_t conf_no;
+    //u8_t status0, status1, status2;
+    
+    delay_us(100);
+    c = c & 0x1F;
+    
+    if (s == 1) {   /* P Conf number */
+        p += 32;
+    }
+    CONF_DATA = p;
+    delay_us(100);
+
+    if (gaini == 1) { /* AI input Gain and attenuation */
+        ai += 16;
+    }
+  
+    CONF_DATA = ai;
+    delay_us(100);
+
+    if (gaino == 1) { /* AO output gain and attenuation */
+        ao += 16;
+    }
+   
+    CONF_DATA = ao;
+    delay_us(100);
+
+    if (pt == 1) {  /* C channel number */
+        c += 64;
+    }
+
+    CONF_DATA = c;
+
+    delay_us(100);
+    CONF_CONTROL = 0x7;
+    
+    conf_no = (s == 1 ? p-32 : p);
+    LOG_I("Conference set, Conf_no:%d, First member:%s, Ai: %x, Ao: %x, channle:%x",
+        conf_no, s==1?"Yes":"No", ai, ao, c);
+
+#if 0
+    status0 = m34116_status(c & 0x1f);
+    status1 = m34116_other_status();
+    status2 = m34116_other_status();
+    LOG_I("Read m34116 register status, 0x'%x' slot, conf_no=%d, ai=%d, ao=%d", c, status0, status1, status2);
+    if (status0 != conf_no || status1 != ai || status2 != ao) {
+        LOG_W("write error!");
+    }
+#endif
+}
+
+void m34116_transparent_mode(u8_t slot)
+{
+    CONF_DATA = 0; /* ai = 0*/
+    delay_us(100);
+    CONF_DATA = 3; /* ao = 0 */
+    delay_us(100);
+    CONF_DATA = slot;
+    delay_us(100);
+    CONF_CONTROL = 0x3;
+}
+
+u8_t m34116_check_overlow(void)
+{
+    delay_us(10);
+    CONF_CONTROL = 0xa;
+    delay_us(10);
+    return CONF_DATA;
+}
+
+void m34116_transparent_test(u8_t slot)
+{
+    u8_t data0, data1, data2;
+    m34116_mode();
+    m34116_transparent_mode(slot);
+  
+    HAL_Delay(1);
+    data0 = m34116_status(slot);
+   
+    data1 = m34116_other_status();
+    data2 = m34116_other_status();
+
+    LOG_I("m34116 set transparant mode, check:%s, data0=%d, ai=%d, ao=%d",
+    data0 == 31 ? "YES":"NO", data0, data1, data2);
+}
+
+void m34116_conference_test(u8_t slot)
+{
+    u8_t data0, data1, data2;
+    u8_t conf_no;
+    m34116_mode();
+    
+    conf_no = 10;
+    m34116_conf_connect(conf_no, 0, 1, 0, 3, slot, 1, 0);
+    data0 = m34116_status(slot);
+    data1 = m34116_other_status();
+    data2 = m34116_other_status();
+    
+    LOG_I("m34116 set conference mode, '%d' slot conference_no:%s, data0=%d, ai=%d, ao=%d",
+    data0 == conf_no ? "YES":"NO", slot, data0, data1, data2);
+    
+    LOG_D("add '%d' slot in conference", slot+1);
+    m34116_conf_connect(conf_no, 0, 2, 0, 2, slot+1, 0, 0);
+    data0 = m34116_status(slot+1);
+    data1 = m34116_other_status();
+    data2 = m34116_other_status();
+    
+    LOG_I("'%d' slot conference_no:%s, data0=%d, ai=%d, ao=%d",
+    slot + 1, data0 == conf_no ? "YES":"NO", data0, data1, data2);
 }
 
 u8_t read_dtmf(u8_t slot)
@@ -737,43 +840,100 @@ void conf_module_detect(void)
     }
 }
 
-void mfc_module_detect(void)
+void m34116_zl50020_test(u8_t slot)
 {
-    if (read_dtmf(0) == 0 && read_dtmf(16) == 0) {
-       LOG_I("MFC MODULE INSTALLED!");
-        ram_params.mfc_module_installed = 1;
-    } else {
-        LOG_W("MFC MODULE NOT INSTALLED!\n");
-        ram_params.mfc_module_installed = 0;
+    struct zl50020_cml *cml = ZL_CML;
+    u8_t idle_code = 0x55;
+    u8_t test_e1 = 0;
+    u8_t test_slot = slot;
+
+    if (!zl50020_inited) {
+        zl50020_init();
     }
+   
+    LOG_I("Now test ZL50020 and DS26518 slot connection, test_slot = %d, test_e1=%d, idle_code=%x",
+        test_slot, test_e1, idle_code);
+    ds26518_set_idle_code(test_e1,test_slot, idle_code, 1);
+    
+    ds26518_set_idle_code(test_e1,test_slot+1, idle_code, 1);
+
+    set_ds26518_loopback(0, FRAME_LOCAL_LP);
+    LOG_D("After Loopback on e1, e1 tx ==> rx, so, read zl50020 data memory , should be=%x", idle_code);
+
+    u8_t o_stream = (card_id & 0xf)*2 + PCM_BUS_START_STREAM;
+
+    LOG_I("First test local stream, stream no = %d, slot=%d", test_e1, test_slot);
+    HAL_Delay(2);
+    read_zl50020_data_mem(test_e1, test_slot, idle_code);
+    LOG_I("Then test PCM bus, stream no = %d, slot = %d", o_stream, test_slot);
+    HAL_Delay(2);
+    read_zl50020_data_mem(o_stream, test_slot, idle_code);
+
+    LOG_I("Now connect conf module hear slot, and conf module set transparent mode.");
+    cml->sto_connect[CONF_STREAM][slot] = (test_e1 << 9) | (test_slot << 1);
+    m34116_conference_test(slot);
+
+    LOG_I("Now read %d stream %d slot data", CONF_STREAM, slot);
+    HAL_Delay(10);
+    read_zl50020_data_mem(CONF_STREAM, slot, idle_code);
+    read_zl50020_data_mem(CONF_STREAM,slot+1,idle_code);
+    read_zl50020_data_mem(CONF_STREAM,slot+2,idle_code);
+    
+    /*Close test, and reset idle code and loopback */
+    m34116_disconnect(slot);
+    m34116_disconnect(slot+1);
+    ds26518_set_idle_code(test_e1,test_slot, 0x37,0);
+    set_ds26518_loopback(0, NO_LP);    
 }
 
-void mfc_t32_zl50020_test(u8_t test_value)
+u8_t mfc_t32_zl50020_test(u8_t test_value)
 {
+    struct zl50020_cml *cml = ZL_CML;
     int test_ok = 1;
+    
     /* t32负责放A1-A7， mfc负责解码，zl50020负责连接时隙 */
     if (!zl50020_inited) {
         zl50020_init();
     }
-
-    for (int i = 0; i < 1; i++)
-    {
-        connect_slot(i, TONE_E1, test_value, TONE_E1);
-        HAL_Delay(100);
-        u8_t read_value = read_dtmf(i);
-        LOG_W("write=%x\tread=%x", test_value, read_value);
-        if (test_value != (read_value & 0xf)) {
-            LOG_E("MFC decode ERROR on %x-->%x", test_value, read_value);
-            test_ok = 0;
-        }
-    }
-
-    if (test_ok) {
-        LOG_I("MFC DECODE TEST PASS!");
-    } else {
-        LOG_E("MFC DECODE TEST FAILED!!!!");
+  
+    //connect_slot(0, TONE_E1, test_value, TONE_E1);
+    cml->sto_connect[MFC_STREAM][0] = (TONE_STREAM << 9) | ((test_value & 0xf) << 1);
+    HAL_Delay(100);
+    u8_t read_value = read_dtmf(0);
+    LOG_I("write=%x\tread=%x", test_value, read_value);
+    if (test_value != (read_value & 0xf)) {
+        LOG_E("MFC decode ERROR on %x-->%x", test_value, read_value);
+        test_ok = 0;
     }
    
+
+    return test_ok;   
+}
+
+void mfc_module_detect(void)
+{
+    u8_t mfc_installed = 0;
+
+    if (read_dtmf(0) == 0 && read_dtmf(16) == 0) {
+      if ((card_id & 0xf) == 0) {
+        for (int i = 0; i < 16; i++) {
+            mfc_installed = mfc_t32_zl50020_test(i);
+            
+            if (mfc_installed == 0) {
+                LOG_W("MFC MODULE NOT INSTALLED!\n");
+                ram_params.mfc_module_installed = 0;
+                return;
+            }
+            
+        }
+      }
+        LOG_I("MFC MODULE INSTALLED!");
+        ram_params.mfc_module_installed = 1;
+
+    } else {
+        LOG_W("MFC MODULE NOT INSTALLED!\n");
+        ram_params.mfc_module_installed = 0;
+    }
 }
 
 u8_t get_card_id(void)
@@ -916,15 +1076,8 @@ void led_test(void)
 }
 
 void module_test(void)
-{
+{ 
     conf_module_detect();
 
     mfc_module_detect();
-    
-    if (ram_params.mfc_module_installed) {
-      LOG_I("Now MFC-TONE32-ZL50020 test is going on!");
-      for (int i = 0; i < 16; i++) {
-        mfc_t32_zl50020_test(i);
-      }
-    }  
 }

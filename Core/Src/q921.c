@@ -23,7 +23,7 @@
 #include "server_interface.h"
 #include "sched.h"
 
-#define LOG_TAG              "q921"
+#define LOG_TAG              "isdn"
 #define LOG_LVL              LOG_LVL_DBG
 #include "ulog.h"
 
@@ -538,8 +538,13 @@ static int q921_check_delay_restart(mtp2_t *m)
 		 * For PTMP links:
 		 * We can optionally keep L2 automatically alive and happy.
 		 */
-		restart_timer_start(m);
 
+		u8_t l1_status = (ram_params.e1_l1_alarm >> m->e1_no) & 1;
+    
+		if (l1_status == 0) {
+			restart_timer_start(m);
+		}
+		
 		switch (m->q921_state) {
 		case Q921_MULTI_FRAME_ESTABLISHED:
 		case Q921_TIMER_RECOVERY:
@@ -573,11 +578,13 @@ static void q921_clear_exception_conditions(mtp2_t *m)
 
 static void q921_dump_pri(mtp2_t *m, char direction_tag);
 
+
 void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 {
 	int x;
 	const char *type;
 	char direction_tag;
+	u8_t ft = h->raw[2];
 
 	direction_tag = txrx ? '>' : '<';
 
@@ -598,7 +605,7 @@ void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 #endif
 
 	if (debugflags) {
-		switch (h->h.data[0] & Q921_FRAMETYPE_MASK) {
+		switch (ft & Q921_FRAMETYPE_MASK) {
 		case 0:
 		case 2:
 			LOG_D("%d E1: %c Informational frame:", m->e1_no, direction_tag);
@@ -619,7 +626,7 @@ void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 			h->h.tei);
 #endif
 
-		switch (h->h.data[0] & Q921_FRAMETYPE_MASK) {
+		switch (ft & Q921_FRAMETYPE_MASK) {
 		case 0:
 		case 2:
 			/* Informational frame */
@@ -723,8 +730,6 @@ void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 static void q921_dump_pri(mtp2_t *m, char direction_tag)
 {
 
-//	CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c TEI: %d State %d(%s)",
-//		m->e1_no, direction_tag, m->tei, m->q921_state, q921_state2str(m->q921_state));
 	LOG_D("%d E1: %c V(A)=%d, V(S)=%d, V(R)=%d",
 		m->e1_no, direction_tag, m->v_a, m->v_s, m->v_r);
 #if 0
@@ -1142,6 +1147,7 @@ static void q921_mdl_error(mtp2_t *m, char error)
 
 static void t200_expire(void *data)
 {
+	//u8_t l1_status;
 	mtp2_t *m = (mtp2_t *)data;
 
 	m->t200_timer = 0;
@@ -1171,8 +1177,6 @@ static void t200_expire(void *data)
 			q921_establish_data_link(m);
 			m->l3_initiated = 0;
 			q921_setstate(m, Q921_AWAITING_ESTABLISHMENT);
-			//告诉第3层链路中断
-			//ToDo...
 		}
 		break;
 	case Q921_AWAITING_ESTABLISHMENT:
@@ -1185,8 +1189,6 @@ static void t200_expire(void *data)
 			q921_discard_iqueue(m);
 			//q921_mdl_error(m, 'G');
 			q921_setstate(m, Q921_TEI_ASSIGNED);
-			/* DL-RELEASE indication */
-			//q931_dl_event(m, Q931_DL_EVENT_DL_RELEASE_IND);
 		}
 		break;
 	case Q921_AWAITING_RELEASE:
@@ -1197,8 +1199,6 @@ static void t200_expire(void *data)
 		} else {
 			q921_check_delay_restart(m);
 			q921_mdl_error(m, 'H');
-			/* DL-RELEASE confirm */
-			//q931_dl_event(m, Q931_DL_EVENT_DL_RELEASE_CONFIRM);
 			q921_setstate(m, Q921_TEI_ASSIGNED);
 		}
 		break;
@@ -1347,16 +1347,6 @@ static int is_command(mtp2_t *m, q921_h *h)
 
 	return command;
 }
-
-/**
-static void q921_clear_exception_conditions(mtp2_t *m)
-{
-	m->own_rx_busy = 0;
-	m->peer_rx_busy = 0;
-	m->reject_exception = 0;
-	m->acknowledge_pending = 0;
-}
-**/
 
 static int q921_sabme_rx(mtp2_t *m, q921_h *h)
 {
@@ -2142,7 +2132,8 @@ static int __q921_receive_qualified(mtp2_t *m, q921_h *h, int len)
 {
 	int res;
 
-	switch (h->h.data[0] & Q921_FRAMETYPE_MASK) {
+    u8_t *data = &(h->raw[2]);
+	switch (data[0] & Q921_FRAMETYPE_MASK) {
 	case 0:
 	case 2:
 		res = q921_iframe_rx(m, h, len);
@@ -2248,9 +2239,8 @@ void q921_start(mtp2_t *m)
 int q921_receive(mtp2_t *m, q921_h *h, int len)
 {
 	int ret = 0;
-	int debug = 1;
 
-	q921_dump(m, h, len, debug, 0);
+	//q921_dump(m, h, len, debug, 0);
 
 	/* Check some reject conditions -- Start by rejecting improper ea's */
 	if (h->h.ea1 || !h->h.ea2) {

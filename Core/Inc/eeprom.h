@@ -91,6 +91,7 @@ extern u8_t group_user[81];
 extern void update_eeprom(void);
 extern void reload_eeprom(void);
 extern void init_eeprom(void);
+extern void load_default_param(void);
 
 #define VOICE_450HZ_TONE      16
 #define VOICE_950HZ_TONE      19

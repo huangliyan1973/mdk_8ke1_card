@@ -33,16 +33,6 @@ static FRAMER *ds26518_global_framer(void)
 	return  (FRAMER *)&dev->te1[0];
 }
 
-static void delay_us(void)
-{
-	FRAMER *f = ds26518_global_framer();
-	UC i = f->idr;
-
-	for(i=0; i < 10; i++){
-		;
-	}
-}
-
 static FRAMER *ds26518_framer(int e1_no)
 {
 	DEVICE *dev = DS26518_DEVICE;
@@ -345,7 +335,7 @@ void set_ds26518_backplane_refclock(enum BACKPLANE_REFERENCE back_ref)
 
 	f->gtccr1 = (f->gtccr1 & 0x0f) | (back_ref << 4);
 
-	delay_us();
+	LOG_I("set ds26518 ref clock, GTCCR1=%x, back_ref=%d", f->gtccr1, back_ref);
 }
 
 /*

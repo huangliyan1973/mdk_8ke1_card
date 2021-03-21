@@ -1,6 +1,7 @@
 #include <string.h>
 #include "main.h"
 #include "cmsis_os.h"
+#include "FreeRTOS.h"
 
 #include "lwip/apps/snmp.h"
 #include "lwip/opt.h"
@@ -13,12 +14,16 @@
 
 #include "usart.h"
 #include "eeprom.h"
+#include "ds26518.h"
+#include "mtp.h"
 #include "server_interface.h"
 #include "zl50020.h"
 
 #define LOG_TAG              "snmp"
 #define LOG_LVL              LOG_LVL_DBG
 #include "ulog.h"
+
+extern osThreadId_t defaultTaskHandle;
 
 extern ip4_addr_t local_addr;
 
@@ -419,10 +424,28 @@ static snmp_err_t snmp_get_value(struct snmp_varbind *vb)
     return SNMP_ERR_NOERROR;
 }
 
+void restart_system(void)
+{
+    __set_FAULTMASK(1); // 关闭所有中断
+    NVIC_SystemReset(); // 复位
+}
+
+static void softreset(void)
+{
+    if (ram_params.init_flag == 0xA5) {
+        load_default_param();
+        restart_system();
+    } else if (ram_params.init_flag == 0x5A) {
+        restart_system();
+    }
+}
+
 static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
 {
     u8_t instance, value;
+    u8_t old_value, mask;
     u32_t sub_oid;
+    u8_t e1_no;
     
     snmp_err_t  err = snmp_oid_check(vb);
     if (err != SNMP_ERR_NOERROR) {
@@ -440,28 +463,74 @@ static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
             if (sub_oid <= 13 && sub_oid != 7) {
                 if (instance < E1_CARDS) {
                     if (sub_oid == 1) {
-                        if (value != e1_params.e1_enable[instance] && instance == card_id) {
-                            update_e1_enable(value);
-                            //e1_params.e1_enable[instance] = value ;
+                        old_value = e1_params.e1_enable[instance & 0xf];
+                        e1_params.e1_enable[instance & 0xf] = value;
+
+                        if (value != old_value && instance == card_id) {
+                            for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+                                mask = 1 << i;
+                                if (!(old_value & mask) && (value & mask)) {
+                                    e1_port_init(i);
+                                }
+                            }
                         }
                         
                     } else if (sub_oid == 2) {
-                        e1_params.e1_l2_alarm_enable[instance] = value ;
+                        e1_params.e1_l2_alarm_enable[instance & 0xf] = value ;
                     } else if (sub_oid == 3) {
-                        e1_params.e1_port_type[instance] = value ;
+                        old_value = e1_params.e1_port_type[instance & 0xf];
+                        e1_params.e1_port_type[instance & 0xf] = value ;
+
+                        if(value != old_value && instance == card_id) {
+                            for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+                                mask = 1 << i;
+                                if ((old_value & mask) != (value & mask)) {
+                                    e1_port_init(i);
+                                }
+                            }
+                        }
+                        
                     } else if (sub_oid == 4) {
-                        e1_params.isdn_port_type[instance] = value ;
+                        old_value = e1_params.isdn_port_type[instance & 0xf];
+                        e1_params.isdn_port_type[instance & 0xf] = value ;
+
+                        if(value != old_value && instance == card_id) {
+                            for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+                                mask = 1 << i;
+                                if ((old_value & mask) != (value & mask)) {
+                                    e1_port_init(i);
+                                }
+                            }
+                        }
                     } else if (sub_oid == 5) {
-                        e1_params.pll_src[instance] = value ;
+                        old_value = e1_params.pll_src[instance & 0xf];
+                        e1_params.pll_src[instance & 0xf] = value ;
+                        if (old_value != value && instance == card_id) {
+                            if ((card_id & 0xf) == 0) {
+                                if (value <= E1_PORT_PER_CARD) {
+                                    set_ds26518_master_clock((enum BACKPLANE_REFERENCE)value);
+                                } 
+                            }
+                        }
+
                     } else if (sub_oid == 6) {
-                        e1_params.crc4_enable[instance] = value ;
-                    } else if (sub_oid == 13) {                       
-                        e1_params.no1_enable[instance] = value ;
-                        if (instance == card_id) {
-                            update_no1_e1(value);
+
+                        e1_params.crc4_enable[instance & 0xf] = value ;
+
+                    } else if (sub_oid == 13) { 
+                        old_value = e1_params.no1_enable[instance & 0xf];                      
+                        e1_params.no1_enable[instance & 0xf] = value ;
+
+                        if (instance == card_id && old_value != value) {
+                            for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+                                mask = 1 << i;
+                                if ((old_value & mask) != (value & mask)) {
+                                    e1_port_init(i);
+                                }
+                            }
                         }
                     } else if (sub_oid == 8) {
-                        e1_params.mtp2_error_check[instance] = value ;
+                        e1_params.mtp2_error_check[instance & 0xf] = value ;
                     } else {
                         return SNMP_ERR_NOSUCHINSTANCE;
                     } 
@@ -469,24 +538,30 @@ static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
                     return SNMP_ERR_NOSUCHINSTANCE;
                 }
             } else if (sub_oid == 7) {
-                if (instance < LWIP_ARRAYSIZE(tone_par_map)) {
+                if ((instance & 0xf) < LWIP_ARRAYSIZE(tone_par_map)) {
                     memcpy (tone_par_map[instance].value, vb->value, vb->value_len);
                 } else {
                     return SNMP_ERR_NOSUCHINSTANCE;
                 }
             } else if (sub_oid == 16) {  
-                if (instance == 1) { /* 16.1 */
-                    uint8_t e1_no = (uint8_t)vb->oid.id[e1_oid_len + 3] & 0x7;
+                if ((instance & 0xf) == 1) { /* 16.1 */
+                    e1_no = (u8_t)vb->oid.id[e1_oid_len + 3] & 0x7;
                     memcpy ((void *)(&e1_params.pc_magic[e1_no].type), vb->value, vb->value_len);
                 } else {
                     return SNMP_ERR_NOSUCHINSTANCE;
                 }
             }
+            
+            if ((sub_oid == 16 && e1_no == 7) || 
+                (sub_oid == 7) || 
+                (instance & 0xf) == 0xf) {
+                xTaskNotifyGive(defaultTaskHandle);
+            }
             break;
         case 3: /*command */
             if (sub_oid == 1) {
                 ram_params.init_flag = value;
-                /* Todo: 重启或EEPROM初始化 */
+                //softreset();
             } else {
                 return SNMP_ERR_NOSUCHINSTANCE;
             }
@@ -732,6 +807,8 @@ static void snmp_8ke1_receive(struct netconn *handle, struct pbuf *p, const ip_a
     if (request.outbound_pbuf != NULL) {
         pbuf_free(request.outbound_pbuf);
     }
+
+    softreset();
 }
 
 static void snmp_netconn_thread(void *arg)

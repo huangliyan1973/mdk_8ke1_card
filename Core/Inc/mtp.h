@@ -1,7 +1,7 @@
 #ifndef MTP_H
 #define MTP_H
 
-#include "lwip/sys.h"
+#include <stdint.h>
 
 #define E1_LINKS_MAX			8
 #define MTP_MBOX_SIZE 			6
@@ -74,85 +74,55 @@ enum Q931_DL_EVENT {
 };
 
 typedef struct q921_header {
-#if BYTE_ORDER == BIG_ENDIAN 
-    u8_t	sapi:6;	/* Service Access Point Indentifier (always 0 for PRI) (0) */
-	u8_t	c_r:1;		/* Command/Response (0 if CPE, 1 if network) */
-	u8_t	ea1:1;		/* Extended Address (0) */
-	u8_t	tei:7;		/* Terminal Endpoint Identifier (0) */
-	u8_t	ea2:1;		/* Extended Address Bit (1) */
-#else
-	u8_t	ea1:1;		/* Extended Address (0) */
-	u8_t	c_r:1;		/* Command/Response (0 if CPE, 1 if network) */
-	u8_t	sapi:6;	/* Service Access Point Indentifier (always 0 for PRI) (0) */
-	u8_t	ea2:1;		/* Extended Address Bit (1) */
-	u8_t	tei:7;		/* Terminal Endpoint Identifier (0) */
-#endif
-	u8_t	data[1];	/* Further data */
+	uint8_t	ea1:1;		/* Extended Address (0) */
+	uint8_t	c_r:1;		/* Command/Response (0 if CPE, 1 if network) */
+	uint8_t	sapi:6;	    /* Service Access Point Indentifier (always 0 for PRI) (0) */
+	uint8_t	ea2:1;		/* Extended Address Bit (1) */
+	uint8_t	tei:7;		/* Terminal Endpoint Identifier (0) */
+
 } __attribute__ ((packed)) q921_header;
 
 /* A Supervisory Format frame */
 typedef struct q921_s {
 	struct q921_header h;	/* Header */
-#if BYTE_ORDER == BIG_ENDIAN
-	u8_t x0:4;			/* Unused */
-	u8_t ss:2;			/* Supervisory frame bits */
-	u8_t ft:2;			/* Frame type bits (01) */
-	u8_t n_r:7;			/* Number Received */
-	u8_t p_f:1;			/* Poll/Final bit */
-#else
-	u8_t ft:2;			/* Frame type bits (01) */
-	u8_t ss:2;			/* Supervisory frame bits */
-	u8_t x0:4;			/* Unused */
-	u8_t p_f:1;			/* Poll/Final bit */
-	u8_t n_r:7;			/* Number Received */
-#endif
-	u8_t data[1];		/* Any further data */
-	u8_t fcs[2];		/* At least an FCS */
+	uint8_t ft:2;			/* Frame type bits (01) */
+	uint8_t ss:2;			/* Supervisory frame bits */
+	uint8_t x0:4;			/* Unused */
+	uint8_t p_f:1;			/* Poll/Final bit */
+	uint8_t n_r:7;			/* Number Received */
+
+	uint8_t data[1];		/* Any further data */
 } __attribute__ ((packed)) q921_s;
 
 /* An Unnumbered Format frame */
 typedef struct q921_u {
-	struct q921_header h;	/* Header */
-#if BYTE_ORDER == BIG_ENDIAN
-	u8_t m3:3;			/* Top 3 modifier bits */
-	u8_t p_f:1;			/* Poll/Final bit */
-	u8_t m2:2;			/* Two more modifier bits */
-	u8_t ft:2;			/* Frame type bits (11) */
-#else
-	u8_t ft:2;			/* Frame type bits (11) */
-	u8_t m2:2;			/* Two more modifier bits */
-	u8_t p_f:1;			/* Poll/Final bit */
-	u8_t m3:3;			/* Top 3 modifier bits */
-#endif
-	u8_t data[1];		/* Any further data */
-	u8_t fcs[2];		/* At least an FCS */
+	struct q921_header h;	/* Header */	
+	uint8_t ft:2;			/* Frame type bits (11) */
+	uint8_t m2:2;			/* Two more modifier bits */
+	uint8_t p_f:1;			/* Poll/Final bit */
+	uint8_t m3:3;			/* Top 3 modifier bits */
+	
+	uint8_t data[1];		/* Any further data */
 } __attribute__ ((packed)) q921_u;
 
 /* An Information frame */
 typedef struct q921_i {
 	struct q921_header h;	/* Header */
-#if BYTE_ORDER == BIG_ENDIAN
-	u8_t n_s:7;			/* Number sent */
-	u8_t ft:1;			/* Frame type (0) */
-	u8_t n_r:7;			/* Number received */
-	u8_t p_f:1;			/* Poll/Final bit */
-#else
-	u8_t ft:1;			/* Frame type (0) */
-	u8_t n_s:7;			/* Number sent */
-	u8_t p_f:1;			/* Poll/Final bit */
-	u8_t n_r:7;			/* Number received */
-#endif
-	u8_t data[1];		/* Any further data */
-	u8_t fcs[2];		/* At least an FCS */
-} q921_i;
+	uint8_t ft:1;			/* Frame type (0) */
+	uint8_t n_s:7;			/* Number sent */
+	uint8_t p_f:1;			/* Poll/Final bit */
+	uint8_t n_r:7;			/* Number received */
+
+	uint8_t data[1];		/* Any further data */
+} __attribute__ ((packed)) q921_i;
 
 typedef union {
-	u8_t raw[1];
 	q921_u u;
 	q921_s s;
 	q921_i i;
 	struct q921_header h;
-} q921_h;
+	uint8_t raw[5];
+} __attribute__ ((packed)) q921_h;
 
 enum q921_tx_frame_status {
 	Q921_TX_FRAME_NEVER_SENT,
@@ -219,91 +189,101 @@ typedef struct mtp2_state{
 		MTP2_INSERVICE,
 	} state;
 
-	u8_t send_fib;
-	u8_t send_bsn, send_bib;
+	uint8_t send_fib;
+	uint8_t send_bsn, send_bib;
 
-	u8_t sls;
-	u8_t subservice;
+	uint8_t sls;
+	uint8_t subservice;
 
-	u8_t e1_no;
+	uint8_t e1_no;
 
-	u8_t rx_buf[MTP_MAX_PCK_SIZE];
-	u16_t rx_len;
+	uint8_t rx_buf[MTP_MAX_PCK_SIZE];
+	uint16_t rx_len;
 
-	u8_t tx_buffer[MTP_MAX_PCK_SIZE];
-	u16_t tx_len;
+	uint8_t tx_buffer[MTP_MAX_PCK_SIZE];
+	uint16_t tx_len;
 
 	/* Last few raw bytes received, for debugging link errors. */
-	u8_t backbuf[32];
-	u16_t backbuf_idx;
+	uint8_t backbuf[32];
+	uint16_t backbuf_idx;
 
 	/*Retransmit buffer */
 	struct {
-		u16_t len;
-		u8_t buf[MTP_MAX_PCK_SIZE];
+		uint16_t len;
+		uint8_t buf[MTP_MAX_PCK_SIZE];
 	}retrans_buf[128];
 
 	/* Retransmit counter; if this is != -1, it means that retransmission is
 	   taking place, with this being the next sequence number to retransmit. */
 	int retrans_seq;
 	/* Last sequence number ACK'ed by peer. */
-	int retrans_last_acked;
+	uint8_t retrans_last_acked;
 	/* Last sequence number sent to peer. */
-	int retrans_last_sent;
+	uint8_t retrans_last_sent;
 
-	u16_t bsn_errors;
+	uint16_t bsn_errors;
 
-	u16_t protocal;
+	uint16_t protocal;
 
-	u16_t init_down;
+	uint16_t init_down;
 
-	u16_t emergent_setup;
+	uint16_t emergent_setup;
 
-	u32_t last_send_fisu;
+	uint32_t last_send_fisu;
+
+	uint32_t last_send_sif;
+
+	uint8_t sccp_flag;
+
+	uint32_t sin_scount ;
+	uint32_t sin_rcount ;
+	uint32_t fisu_scount ;
+	uint32_t fisu_rcount ;
+	uint32_t miss_fisu_count;
 
 	/****************************ISDN PRI Part *************************/
 
-	u16_t pri_mode;
+	uint16_t pri_mode;
 
 	enum q921_state q921_state;
 
 	enum q921_tei_check_state	tei_check;
 
-	u8_t sapi;
-	u8_t tei;
-	u8_t ri;   /*TEI assignment random indicator */
+	uint8_t sapi;
+	uint8_t tei;
+	uint8_t ri;   /*TEI assignment random indicator */
 
 	/*! V(A) - Next I-frame sequence number needing ack */
-	u8_t v_a;
+	uint8_t v_a;
 	/*! V(S) - Next I-frame sequence number to send */
-	u8_t v_s;
+	uint8_t v_s;
 	/*! V(R) - Next I-frame sequence number expected to receive */
-	u8_t v_r;
+	uint8_t v_r;
 
 	struct {
-		u16_t len;
-		u8_t buf[U_S_PCK_SIZE];
+		uint16_t len;
+		uint8_t buf[U_S_PCK_SIZE];
 	}u_s_frame[U_S_PCK_BUFF_SIZE];
 
-	u16_t s_h, s_t;
+	uint16_t s_h, s_t;
 
 	/*! T-200 retransmission timer */
-	u16_t t200_timer;
+	uint16_t t200_timer;
 	/*! Retry Count (T200) */
-	u16_t RC;
+	uint16_t RC;
 	//int t201_timer;
 	//int t202_timer;
-	u16_t n202_counter;
+	uint16_t n202_counter;
 	/*! Max idle time */
 	//int t203_timer;
 	/*! Layer 2 persistence restart delay timer */
 	//int restart_timer;
 
-	u16_t t201_expirycnt;
+	uint16_t t201_expirycnt;
 
 	/* MDL variables */
 	//int mdl_timer;
-	u16_t mdl_error;
+	uint16_t mdl_error;
 	unsigned int mdl_free_me:1;
 
 	unsigned int peer_rx_busy:1;
@@ -318,11 +298,11 @@ extern void mtp_init(void);
 
 extern void mtp_cleanup(void);
 
-extern mtp2_t *get_mtp2_state(u8_t link_no);
+extern mtp2_t *get_mtp2_state(uint8_t link_no);
 
-extern void mtp2_queue_msu(u8_t e1_no, u8_t sio, u8_t *sif, int len);
+extern void mtp2_queue_msu(uint8_t e1_no, uint8_t sio, uint8_t *sif, int len);
 
-extern void mtp2_command(u8_t e1_no, u8_t command);
+extern void mtp2_command(uint8_t e1_no, uint8_t command);
 
 extern void q921_start(mtp2_t *m);
 
@@ -330,28 +310,27 @@ extern int q921_receive(mtp2_t *m, q921_h *h, int len);
 
 extern void q921_pick_frame(mtp2_t *m);
 
-extern int q921_transmit_iframe(u8_t e1_no, void *buf, int len /*, int cr*/);
+extern int q921_transmit_iframe(uint8_t e1_no, void *buf, int len /*, int cr*/);
 
-extern int q921_transmit_uiframe(u8_t e1_no, void *buf, int len);
+extern int q921_transmit_uiframe(uint8_t e1_no, void *buf, int len);
 
-extern void send_ccs_msg(u8_t e1_no, u8_t send_len);
+extern void send_ccs_msg(uint8_t e1_no, uint8_t send_len);
 
-extern void rv_ccs_byte(u8_t e1_no, u8_t data);
+extern void rv_ccs_byte(uint8_t e1_no, uint8_t data);
 
-extern void check_ccs_msg(u8_t e1_no);
+extern void check_ccs_msg(uint8_t e1_no);
 
-extern void bad_msg_rev(u8_t e1_no, u8_t err);
+extern void bad_msg_rev(uint8_t e1_no, uint8_t err);
 
-extern u8_t read_l2_status(int e1_no);
+extern uint8_t read_l2_status(int e1_no);
 
 extern void e1_port_init(int e1_no);
 
-extern sys_mutex_t lock_mtp_core;
 
 //extern void ds26518_send_sio_test(void);
 extern void init_mtp2_mem(void);
 
-extern u8_t is_ccs_port(int e1_no);
+extern uint8_t is_ccs_port(int e1_no);
 
 extern void start_mtp2_process(int e1_no);
 

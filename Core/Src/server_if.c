@@ -23,7 +23,7 @@
 #include "ulog.h"
 
 static struct netconn *ss7_conn;
-//static struct netconn *isdn_conn;
+static struct netconn *isdn_conn;
 //static struct netconn *other_conn;
 
 extern u8_t card_id;
@@ -63,7 +63,8 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
     struct other_msg  *ot_msg = (struct other_msg *)p->payload;
     
     u8_t dst_port, dst_slot, src_port, src_slot;
-    u8_t toneno, group, old_group, i;
+    u8_t toneno, group, old_group;
+    //u8_t i, tmpBase;
 
     dst_port = ((ot_msg->dst_id & 0xF) << 3) | (ot_msg->dst_slot >> 5);
     dst_slot = ot_msg->dst_slot & 0x1F;
@@ -127,14 +128,17 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
             group_user[group]++;
             if (group_user[group] == 1) {
                 m34116_conf_connect((group % 10) + 1, 0, 2, 0, 0, ot_msg->src_slot, 1, 0);
-            } else {
+            } else {                
                 toneno = ((group_user[group] >> 2) * 3 + 2) & 0xF;
-                src_port = (src_port >> 5) << 5;
-                for (i = src_port; i < src_port + 32; i++) {
+                m34116_conf_connect((group % 10) + 1, 0, toneno, 0, 4, ot_msg->src_slot, 0, 0);
+                /**
+                tmpBase = (ot_msg->src_slot >> 5) << 5;
+                for (i = tmpBase; i < tmpBase + 32; i++) {
                     if (slot_params[i].port_to_group == group) {
-                        m34116_conf_connect((group % 10) + 1, 0, toneno, 1, 2, ot_msg->src_slot, 0, 0);
+                        m34116_conf_connect((group % 10) + 1, 0, toneno, 0, 2, ot_msg->src_slot, 0, 0);
                     }
                 }
+                **/
             }
             break;
         case CON_DISC_GRP:
@@ -173,23 +177,25 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
     }
 }
 
-#if 0
+
 static void isdn_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *src_addr, u16_t port)
 {
     LWIP_UNUSED_ARG(conn);
 
-    struct isdn_msg *isdnmsg = (struct isdn_msg *)p->payload;
+    struct server_msg *isdnmsg = (struct server_msg *)p->payload;
     
-    u8_t pd = isdnmsg->msg.l3msg.pd;
+    u8_t pd = isdnmsg->sio;
     u8_t e1_no = isdnmsg->e1_no;
 
     if ((e1_no >> 3) != card_id) {
-        printf("out of isdn msg range e1_no = %d, card_id = %d\n", e1_no, card_id);
+        LOG_W("rev isdn port message , e1_no = %02X, card_id = %02X, can't match!", e1_no, card_id);
+        LOG_HEX("d", 16, p->payload, p->tot_len);
         return;
     }
 
     if (pd == ISDN_PD) {
-
+        q921_transmit_iframe(e1_no & 0x7, (void *)&isdnmsg->sio, isdnmsg->msg_len);
+        LOG_HEX("SN==>ISDN", 16, p->payload, p->tot_len);
     }
 }
 
@@ -219,7 +225,7 @@ static void isdn_netconn_thread(void *arg)
         }
     } while (1);
 }
-#endif
+
 
 static char *rev_mtp2_msg_name(u8_t sio)
 {
@@ -260,6 +266,8 @@ static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *s
 
     u8_t sio = serv_msg->sio;
     u8_t e1_no = serv_msg->e1_no;
+    u8_t local_e1 = e1_no & 7;
+    u8_t magic_src_dpc[3];
 
     if ((sio != OTHER_SIO && sio != MTP2_COMMAND_SIO)) {
         if ((e1_no >> 3) != card_id) {
@@ -273,21 +281,38 @@ static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *s
             if (serv_msg->msg.serv_comm.command == 0xFF) {
                 set_mtp2_heart_msg_dstip(serv_msg->msg.serv_comm.dest_ip);
             } else {
-                mtp2_command(e1_no & 7, serv_msg->msg.serv_comm.command);
+                mtp2_command(local_e1, serv_msg->msg.serv_comm.command);
             }
-            //mtp2_heart_msg.dst_ip[e1_no & 7] = serv_msg->msg.serv_comm.server_ip;
             break;
         case OTHER_SIO:
             other_receive(conn, p, src_addr);
             break;
         case ISDN_SIO:
-            q921_transmit_iframe(e1_no & 0x7, (void *)&serv_msg->sio, serv_msg->msg_len);
+            q921_transmit_iframe(local_e1, (void *)&serv_msg->sio, serv_msg->msg_len);
             break;
         default:
             if ((sio & 0xf) < 6) {
-                LOG_HEX(rev_mtp3_msg_name(sio & 0xf), 16, p->payload, p->tot_len);
+                if (e1_params.pc_magic[local_e1].type == 2) {
+                    /* 24 bit point code exchange */
+                    magic_src_dpc[0] = e1_params.pc_magic[local_e1].pc2[2];
+                    magic_src_dpc[1] = e1_params.pc_magic[local_e1].pc2[1];
+                    magic_src_dpc[2] = e1_params.pc_magic[local_e1].pc2[0];
+                    
+                    if (magic_src_dpc[0] == serv_msg->msg.ss7.contents[3] &&
+                        magic_src_dpc[1] == serv_msg->msg.ss7.contents[4] &&
+                        magic_src_dpc[2] == serv_msg->msg.ss7.contents[5] ) {
+                  
+                        serv_msg->msg.ss7.contents[3] = e1_params.pc_magic[local_e1].pc1[2];
+                        serv_msg->msg.ss7.contents[4] = e1_params.pc_magic[local_e1].pc1[1];
+                        serv_msg->msg.ss7.contents[5] = e1_params.pc_magic[local_e1].pc1[0];
 
-                mtp2_queue_msu(e1_no & 0x7, sio, serv_msg->msg.ss7.contents, serv_msg->msg_len-1);
+                        LOG_I("E1 '%d' opc : %x-%x-%x", local_e1, e1_params.pc_magic[local_e1].pc1[2],
+                        e1_params.pc_magic[local_e1].pc1[1],e1_params.pc_magic[local_e1].pc1[0]);
+                    }
+                }
+
+                LOG_HEX(rev_mtp3_msg_name(sio & 0xf), 16, (u8_t *)serv_msg, p->tot_len);
+                mtp2_queue_msu(local_e1, sio, serv_msg->msg.ss7.contents, serv_msg->msg_len-1);
             }
     }
 }
@@ -319,15 +344,32 @@ static void ss7_netconn_thread(void *arg)
   } while (1);
 }
 
+void init_slot_param(void)
+{
+    for(int i = 0; i < SLOT_MAX; i++) {
+        slot_params[i].connect_tone_flag = 0xf0;
+        slot_params[i].ct_delay = 0;
+        slot_params[i].port_to_group = IDLE;
+    }
+
+    for(int i = 0; i < 81; i++) {
+        group_user[i] = 0;
+    }
+
+    ram_params.init_flag = IDLE;
+}
+
 #define SS7_STACK_SIZE      256*4
 
 void server_interface_init(void)
 {   
-    //init_r2_param();
+    init_slot_param();
+
     init_mfc_slot();
+
     sys_thread_new("ss7_netconn", ss7_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
-    //start_period_proc();
-    //sys_thread_new("isdn_netconn", isdn_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
+    
+    sys_thread_new("isdn_netconn", isdn_netconn_thread, NULL, SS7_STACK_SIZE, osPriorityNormal);
     
 }
 
@@ -360,11 +402,14 @@ void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len)
         LOG_W("send ss7 msg failed.\n");
     }
 
-    LOG_HEX(rev_mtp2_msg_name(buf[0] & 0xf), 16, (u8_t *)sig_msg, tot_len);
+    if (tot_len < 0x5a) {
+        LOG_HEX(rev_mtp2_msg_name(buf[0] & 0xf), 16, (u8_t *)sig_msg, tot_len);
+    }
     
     netbuf_delete(net_buf);
 }
 
+/*
 static char * other_msg_type(struct other_msg *msg)
 {
     switch (msg->tone_no)
@@ -381,6 +426,8 @@ static char * other_msg_type(struct other_msg *msg)
             return "UNKOWN";
     }
 }
+*/
+
 /* len = msg->m_head.msu_len;
 */
 void send_other_msg(struct other_msg *msg, u8_t len)
@@ -416,7 +463,7 @@ void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len)
 {
     ip4_addr_t *dst_addr;
     
-    if (ss7_conn == NULL)
+    if (isdn_conn == NULL)
         return;
 
     struct netbuf *net_buf = netbuf_new();
@@ -434,7 +481,7 @@ void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len)
     memcpy((void *)&isdn_msg->sio, (void *)buf, len);
     dst_addr = plat_no ? &sn1 : &sn0;
 
-    if (netconn_sendto(ss7_conn, net_buf, dst_addr, ISDN_UDP_PORT) != ERR_OK) {
+    if (netconn_sendto(isdn_conn, net_buf, dst_addr, ISDN_UDP_PORT) != ERR_OK) {
         LOG_W("send ISDN msg failed.\n");
     }
 
