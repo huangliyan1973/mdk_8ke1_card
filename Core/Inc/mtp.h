@@ -161,13 +161,9 @@ enum q921_tei_check_state {
 	Q921_TEI_CHECK_DEAD_REPLY,
 };
 
-/* Max. MTP2 packet size, including sequence numbers */
-//#define MTP_MAX_PCK_SIZE 270
-//#define U_S_PCK_SIZE	128
-
 #define MTP_MAX_PCK_SIZE 256
-#define U_S_PCK_SIZE	64
-#define U_S_PCK_BUFF_SIZE  8
+#define U_S_PCK_SIZE	32
+#define U_S_PCK_BUFF_SIZE  32
 
 typedef struct mtp2_state{
 	enum {
@@ -271,14 +267,9 @@ typedef struct mtp2_state{
 	uint16_t t200_timer;
 	/*! Retry Count (T200) */
 	uint16_t RC;
-	//int t201_timer;
-	//int t202_timer;
+	
 	uint16_t n202_counter;
-	/*! Max idle time */
-	//int t203_timer;
-	/*! Layer 2 persistence restart delay timer */
-	//int restart_timer;
-
+	
 	uint16_t t201_expirycnt;
 
 	/* MDL variables */
@@ -313,6 +304,8 @@ extern void q921_pick_frame(mtp2_t *m);
 extern int q921_transmit_iframe(uint8_t e1_no, void *buf, int len /*, int cr*/);
 
 extern int q921_transmit_uiframe(uint8_t e1_no, void *buf, int len);
+
+extern void q921_cleanup(mtp2_t *m);
 
 extern void send_ccs_msg(uint8_t e1_no, uint8_t send_len);
 

@@ -196,6 +196,8 @@ static void isdn_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *
     if (pd == ISDN_PD) {
         q921_transmit_iframe(e1_no & 0x7, (void *)&isdnmsg->sio, isdnmsg->msg_len);
         LOG_HEX("SN==>ISDN", 16, p->payload, p->tot_len);
+    } else if (pd == ISDN_MNG) {
+        LOG_W("Receive isdn manger message: pri=%x", isdnmsg->msg.serv_comm.command);
     }
 }
 
@@ -290,8 +292,11 @@ static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *s
         case ISDN_SIO:
             q921_transmit_iframe(local_e1, (void *)&serv_msg->sio, serv_msg->msg_len);
             break;
+        case ISDN_MNG:
+            LOG_W("Receive isdn manger message: pri=%x", serv_msg->msg.serv_comm.command);
+            break;
         default:
-            if ((sio & 0xf) < 6) {
+            if ((sio & 0xf) < 6 && SS7_PORT_ENABLE(local_e1) && E1_PORT_ENABLE(local_e1)) {
                 if (e1_params.pc_magic[local_e1].type == 2) {
                     /* 24 bit point code exchange */
                     magic_src_dpc[0] = e1_params.pc_magic[local_e1].pc2[2];
@@ -306,13 +311,16 @@ static void ss7_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *s
                         serv_msg->msg.ss7.contents[4] = e1_params.pc_magic[local_e1].pc1[1];
                         serv_msg->msg.ss7.contents[5] = e1_params.pc_magic[local_e1].pc1[0];
 
-                        LOG_I("E1 '%d' opc : %x-%x-%x", local_e1, e1_params.pc_magic[local_e1].pc1[2],
-                        e1_params.pc_magic[local_e1].pc1[1],e1_params.pc_magic[local_e1].pc1[0]);
+                        //LOG_I("E1 '%d' opc : %x-%x-%x", local_e1, e1_params.pc_magic[local_e1].pc1[2],
+                        //e1_params.pc_magic[local_e1].pc1[1],e1_params.pc_magic[local_e1].pc1[0]);
                     }
                 }
 
                 LOG_HEX(rev_mtp3_msg_name(sio & 0xf), 16, (u8_t *)serv_msg, p->tot_len);
                 mtp2_queue_msu(local_e1, sio, serv_msg->msg.ss7.contents, serv_msg->msg_len-1);
+            } else {
+                LOG_W("Receive Error message to E1 '%d'", local_e1);
+                LOG_HEX(rev_mtp3_msg_name(sio & 0xf), 16, (u8_t *)serv_msg, p->tot_len);
             }
     }
 }
@@ -485,6 +493,7 @@ void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len)
         LOG_W("send ISDN msg failed.\n");
     }
 
+    LOG_HEX("ISDN==>SN", 16, (u8_t *)isdn_msg, tot_len);
     netbuf_delete(net_buf);
 }
 
@@ -921,6 +930,7 @@ void period_500ms_proc(void *arg)
 
     (void)arg;
 
+
     led_status++;
     if (led_status & 1) {
         LED2_GREEN_ON;
@@ -935,7 +945,7 @@ void period_500ms_proc(void *arg)
 
     set_card_e1_led();
 
-    //sched_timeout(500, period_500ms_proc, NULL);
+    
 }
 
 void hb_msg_init(void)

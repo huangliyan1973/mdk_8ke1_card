@@ -45,7 +45,7 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-static u32_t last_update_eeprom;
+//static u32_t last_update_eeprom;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -153,7 +153,7 @@ void StartDefaultTask(void *argument)
 
   snmp_8ke1_init();
 
-  last_update_eeprom = HAL_GetTick();
+  //last_update_eeprom = HAL_GetTick();
 #ifdef BERT_TEST
   //enable_prbs_function(5);
   //ds26518_enable_bert(2,1);
@@ -189,7 +189,7 @@ void StartDefaultTask(void *argument)
     /* need update eeprom */
 //    if ((HAL_GetTick() - last_update_eeprom) > 5000) {
        update_eeprom();
-       last_update_eeprom = HAL_GetTick();
+       //last_update_eeprom = HAL_GetTick();
 //    }
 
   }

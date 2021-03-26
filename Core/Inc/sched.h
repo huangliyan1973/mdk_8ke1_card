@@ -26,4 +26,6 @@ void sched_timeout_init(void);
 
 void sched_timeout_routine(void);
 
+int sched_timeout_is_exist(sched_timeout_handler handler, void *arg);
+
 #endif /* SCHED_TIMEOUTS_H */

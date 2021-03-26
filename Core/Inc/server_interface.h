@@ -15,6 +15,7 @@
 #define  OTHER_SIO			0x87
 #define  MTP2_COMMAND_SIO   0xFF
 #define  ISDN_SIO			0x08
+#define  ISDN_MNG			0xFE
 
 #define  MAPB_HEAD_SIZE  (sizeof(struct mapb_head))
 #define  OTHER_MSG_CONTENT_SIZE		5

@@ -346,7 +346,7 @@ void ulog_raw(const char *format, ...)
  */
 void ulog_hexdump(const char *tag, size_t width, u8_t *buf, size_t size)
 {
-#define __is_print(ch) ((unsigned int)((ch) - ' ') < 127u - ' ')
+//#define __is_print(ch) ((unsigned int)((ch) - ' ') < 127u - ' ')
 
     size_t i, j;
     size_t log_len = 0, name_len = strlen(tag);
@@ -403,6 +403,7 @@ void ulog_hexdump(const char *tag, size_t width, u8_t *buf, size_t size)
             }
         }
         log_len += ulog_strcpy(log_len, log_buf + log_len, "  ");
+#if 0
         /* dump char for hex */
         for (j = 0; j < width; j++)
         {
@@ -412,6 +413,7 @@ void ulog_hexdump(const char *tag, size_t width, u8_t *buf, size_t size)
                 log_len += ulog_strcpy(log_len, log_buf + log_len, dump_string);
             }
         }
+#endif
         /* overflow check and reserve some space for newline sign */
         if (log_len + strlen(ULOG_NEWLINE_SIGN) > ULOG_LINE_BUF_SIZE)
         {

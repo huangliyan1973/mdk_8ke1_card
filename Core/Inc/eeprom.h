@@ -41,13 +41,15 @@ typedef struct {
 	u8_t 	dtmf_mark_space[2];
 	u8_t 	tone_src;
     
+    u8_t    version;
+    
     struct {
         u8_t type;
         u8_t pc1[3];
         u8_t pc2[3];      
     }pc_magic[E1_PORT_PER_CARD];
     
-    u32_t version;
+    
 } e1_params_t;
 
 typedef struct {

@@ -221,9 +221,11 @@ char *get_lrsr_value(u8_t lrsl)
 /* >0 mean liu has some problem */
 u8_t check_liu_status(int e1_no)
 {
+	//static u8_t lrsl[E1_PORT_PER_CARD];
+
 	LIU *l = ds26518_liu(e1_no);
 	u8_t llsr = l->llsr;
-	u8_t lrsl = l->lrsl;
+	//u8_t lrsl_value = l->lrsl;
 	u8_t lrsr = l->lrsr;
 
 	if (llsr & 1){
@@ -249,8 +251,13 @@ u8_t check_liu_status(int e1_no)
 	if (llsr & 0x40){
 		LOG_W("Open-Circuit Clear (OCC) on %d LINK\r\n", e1_no);
 	}
-	l->llsr = llsr;
-	LOG_I("LIU Receive signal Level = %s on %d LINK\r\n", get_lrsr_value(lrsl), e1_no);
+	//l->llsr = llsr;
+#if 0
+	if (lrsl[e1_no] != lrsl_value && lrsl_value > 0) {
+		LOG_I("LIU Receive signal Level = %s on %d LINK\r\n", get_lrsr_value(lrsl_value), e1_no);
+		lrsl[e1_no] = lrsl_value;
+	}
+#endif
 	return llsr;
 }
 
@@ -258,25 +265,28 @@ void read_e1_status(void)
 {
     static u8_t l1_status = 0;
 	LIU *l;
-	u8_t status, llsr;
+	u8_t status, llsr, lrsl;
 	u8_t siglost = 0;
     
 	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
 		l = ds26518_liu(i);
         llsr = l->llsr;
-		if ((llsr & 0xf) > 0 || (l->lrsl >> 4) > 6) {
+		lrsl = l->lrsl;
+		if ((llsr & 0x7) > 0 || (lrsl >> 4) > 1) {
 			/* Bit 3: Jitter Attenuator Limit Trip Set
 			* Bit 2: Open-Circuit Detect
 			* Bit 1: Short-Circuit Detect
 			* Bit 0: Loss of Signal Detect
-			*/
+			*/			
 			status = 1;
 		} else {
 			status = 0;
 		}
 
 		siglost |= (status << i);
-		l->llsr = llsr;
+
+		//l->llsr = llsr;
+		l->llsr = check_liu_status(i);
 	}
     
     if (l1_status != siglost) {
@@ -727,13 +737,17 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	f->riboc = 0;
 #endif
 
+	//l->ltrcr = 0x0;
+	//l->ltipsr = LTIPSR_TIMPTON;
+	//l->lrismr = LRISMR_RIMPON | LRISMR_RIMPM(4); //75Ω internal termination
+	//l->lrcr = 3; // 43db
 
-	l->ltrcr = 0x0; //Jitter attenuator FIFO depth 128 bits and in the receive path. E1,G.775
-	l->ltipsr = LTIPSR_TIMPTON; //Enable transmit terminating impedance.E1, 75Ohm
+	l->ltrcr = 0x20; //Jitter attenuator FIFO depth 32 bits and in the receive path. E1,G.775
+	l->ltipsr = LTIPSR_TIMPTON | LTIPSR_TIMPL(3) | 1; //Enable transmit terminating impedance.E1, 120hm
 
-	l->lrismr = LRISMR_RIMPON | LRISMR_RIMPM(4); //75Ω internal termination
+	l->lrismr = LRISMR_RIMPON | LRISMR_RIMPM(3); //120Ω internal termination
 
-	l->lrcr = 3; //43db for E1
+	l->lrcr = 0; //15 db
 
 	/* after the configuration turn on the framer */
 	f->tmmr |= TMMR_INIT_DONE;
@@ -764,12 +778,7 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 
 	/* Last interrupt global active step */
 	set_ds26518_global_interrupt(1);
-#if 0    
-	ds26518_mon_test2(e1_no, 1);
-	set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
-	HAL_Delay(1);
-	ds26518_mon_test2(e1_no, 1);
-#endif
+
 LOG_D("E1 port '%d' init finished ON %s TYPE!", e1_no, sig_type == CCS_TYPE ? "CCS_TYPE" : "CAS_TYPE");
 
 }

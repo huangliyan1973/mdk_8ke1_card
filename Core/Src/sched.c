@@ -71,6 +71,27 @@ void sched_timeout(u32_t msecs, sched_timeout_handler handler, void *arg)
     sched_timeout_abs(next_timeout_time, handler, arg);
 }
 
+int sched_timeout_is_exist(sched_timeout_handler handler, void *arg)
+{
+    struct sched_timeo *t;
+    u8_t count = 0;
+
+    LOCK_TIME_CORE();
+    if (next_timeout == NULL) {
+        UNLOCK_TIME_CORE();
+        return 0;
+    }
+
+    for (t = next_timeout; t != NULL; t = t->next) {
+        if ((t->h == handler) && (t->arg == arg)) {
+           count++;
+        }
+    }
+
+    UNLOCK_TIME_CORE();
+    return count;
+}
+
 void sched_untimeout(sched_timeout_handler handler, void *arg)
 {
     struct sched_timeo *prev_t, *t;

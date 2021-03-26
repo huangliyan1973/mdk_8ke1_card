@@ -241,8 +241,11 @@ static void start_initial_alignment(mtp2_t *m, char* reason)
         m->emergent_setup = 0;
     }
 
+    mtp2_cleanup(m);
     LOG_D("Starting initial alignment on link '%d', reason: %s.", m->e1_no, reason);
+    
     sched_timeout(T2_TIMEOUT, mtp2_t2_timeout, m);
+    //LOG_W("E1 %d T2_SCHED timeout counts = %d", m->e1_no, sched_timeout_is_exist(mtp2_t2_timeout, m));
 }
 
 /* Find a frame to transmit and put it in the transmit buffer.
@@ -337,7 +340,8 @@ mtp2_pick_frame(mtp2_t *m)
 
         /* Send Fill-in signalling unit (FISU) if nothing else is pending. */
         
-        if (m->sccp_flag == 0 ||(m->sccp_flag == 1 && (tick - m->last_send_fisu) > 33)) {
+        //if (m->sccp_flag == 0 ||(m->sccp_flag == 1 && (tick - m->last_send_fisu) > 33)) {
+        if ((tick - m->last_send_fisu) > 33) {
             m->tx_len = 3;
             m->tx_buffer[0] = m->send_bsn | (m->send_bib << 7);
             m->tx_buffer[1] = m->retrans_last_sent | (m->send_fib << 7);
@@ -414,9 +418,11 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
         if (m->state == MTP2_NOT_ALIGNED) {
             
             sched_untimeout(mtp2_t2_timeout, m);
+            
             sched_timeout(T3_TIMEOUT, mtp2_t3_timeout, m);
             m->state = MTP2_ALIGNED;
             LOG_I("Got status indication 'O' while NOT_ALIGNED on link %d. ", m->e1_no);
+            //LOG_W("E1 %d after receive 'O', T2_SCHED timeout counts = %d", m->e1_no, sched_timeout_is_exist(mtp2_t2_timeout, m));
         
         } else if (m->state == MTP2_PROVING) {
             sched_untimeout(mtp2_t4_timeout, m);
@@ -461,6 +467,7 @@ static void mtp2_process_lssu(mtp2_t *m, u8_t *buf, int fsn, int fib)
             sched_timeout(T3_TIMEOUT, mtp2_t3_timeout, m);
             m->state = MTP2_ALIGNED;
             LOG_I("Got status indication 'N' or 'E' while NOT_ALIGNED on link %d. ", m->e1_no);
+            //LOG_W("E1 %d after receive 'N' or 'E' T2_SCHED timeout counts = %d", m->e1_no, sched_timeout_is_exist(mtp2_t2_timeout, m));
         
         } else if (m->state == MTP2_ALIGNED) {
 
@@ -683,30 +690,7 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
             LOG_W("Got short MSU (no label), li=%d on link '%d'.", li, m->e1_no);
             return;
         }
-#if 0
-        {
-            char pbuf[512], hex[30];
-            int i;
-            int slc;
 
-            switch (variant(m)) {
-            case ITU_SS7:
-                slc = (buf[7] & 0xf0) >> 4;
-                break;
-            case ANSI_SS7:
-            case CHINA_SS7:
-                slc = (buf[10] & 0xf0) >> 4;
-                break;
-            }
-            strcpy(pbuf, "");
-            for(i = 0; i < li - 1 && i + 4 < len; i++) {
-                sprintf(hex, " %02x", buf[i + 4]);
-                strcat(pbuf, hex);
-            }
-            CARD_DEBUGF(MTP_DEBUG, ("Got MSU on link '%d' sio=%d slc=%d m.sls=%d bsn=%d/%d, fsn=%d/%d, sio=%02x, len=%d:%s\n", 
-                            m->e1_no, buf[3] & 0xf, slc, m->sls, bib, bsn, fib, fsn, buf[3], li, pbuf));
-        }
-#endif
         //LOG_HEX("mtp2", 16, &buf[3], len-3);
         u8_t sio = buf[3] & 0xf;
         if (sio == 0 || sio == 1 || sio == 3 || sio == 4 || sio == 5) {
@@ -723,8 +707,8 @@ static void mtp2_good_frame(mtp2_t *m, u8_t *buf, int len)
                     buf[5] = e1_params.pc_magic[m->e1_no].pc2[1];
                     buf[6] = e1_params.pc_magic[m->e1_no].pc2[0];
 
-                    LOG_I("E1 '%d' dpc : %x-%x-%x", m->e1_no, e1_params.pc_magic[m->e1_no].pc1[2],
-                        e1_params.pc_magic[m->e1_no].pc1[1],e1_params.pc_magic[m->e1_no].pc1[0]);
+                    //LOG_I("E1 '%d' dpc : %x-%x-%x", m->e1_no, e1_params.pc_magic[m->e1_no].pc1[2],
+                    //    e1_params.pc_magic[m->e1_no].pc1[1],e1_params.pc_magic[m->e1_no].pc1[0]);
                 }
 
             }
@@ -784,6 +768,8 @@ static void prepare_init_link(int e1_no)
     m->sin_rcount = 0;
     m->fisu_scount = 0;
     m->fisu_rcount = 0;
+
+    
 }
 
 static char* get_protocal(u8_t protocal)
@@ -820,30 +806,34 @@ void e1_port_init(int e1_no)
     }
 
     LOG_W("link '%d' enable = %d", e1_no, E1_PORT_ENABLE(e1_no));
-
-    if (!E1_PORT_ENABLE(e1_no))
-        return;
-
     mtp2_t *m = &mtp2_state[e1_no];
+
+    if (!E1_PORT_ENABLE(e1_no)) {
+        mtp2_cleanup(m);
+        return;
+    }
+    
     memset((void *)m, 0, sizeof(mtp2_t));
 
-    if (!CHN_NO1_PORT_ENABLE(e1_no)) {       
+    if (!CHN_NO1_PORT_ENABLE(e1_no)) { 
+        mtp2_cleanup(m);      
         prepare_init_link(e1_no);
         if (SS7_PORT_ENABLE(e1_no)) { /* ss7 */
             m->protocal = SS7_PROTO_TYPE;
-            LOG_I("link '%d' start ss7 init", e1_no);
+            //LOG_I("link '%d' start ss7 init", e1_no);
             ds26518_port_init(e1_no, CCS_TYPE);
             start_initial_alignment(m, "Initial");
         } else {  /* ISDN PRI */
             m->protocal = PRI_PROTO_TYPE;
             m->pri_mode = PRI_NETWORK_ENABLE(e1_no) ? PRI_NETWORK : PRI_CPE;
-            LOG_I("link '%d' start isdn init, pri mode is %s", e1_no, m->pri_mode == PRI_NETWORK ? "NT" : "LT");
+            //LOG_I("link '%d' start isdn init, pri mode is %s", e1_no, m->pri_mode == PRI_NETWORK ? "NT" : "LT");
             ds26518_port_init(e1_no, CCS_TYPE);
             q921_start(m);
         }
     } else { /* china no.1 */
-        LOG_I("link '%d' start china-no1 init", e1_no);
+        //LOG_I("link '%d' start china-no1 init", e1_no);
         ds26518_port_init(e1_no, CAS_TYPE);
+        mtp2_cleanup(m);
         m->protocal = NO1_PROTO_TYPE;
     }
 
@@ -942,20 +932,6 @@ static void mtp2_thread(void *arg)
 
 void mtp_init(void)
 {
-#if 0
-    if (sys_mbox_new(&mtp_mbox, MTP_MBOX_SIZE) != ERR_OK) {
-        CARD_ASSERT("failed to create mtp thread mbox", 0);
-    }
-
-    if (sys_mutex_new(&lock_mtp_core) != ERR_OK) {
-        CARD_ASSERT("failed to create lock_mtp_core", 0);
-    }
-#endif
-
-    //ds26518_global_init();
-    
-    //memset((void*)&mtp2_state[0], 0, sizeof(mtp2_t)*E1_LINKS_MAX);
-
     for(int index = 0; index < E1_LINKS_MAX; index++) {
         e1_port_init(index);
     }
@@ -968,86 +944,73 @@ void mtp_init(void)
 #endif
 }
 
-#define COMMAND_TIMEOUT     5000
-#define COMMAND_TIMEOUT_CHECK(t, compare_to)   ( (((u32_t)((t)-(compare_to))) > COMMAND_TIMEOUT) ? 1 : 0)
+//#define COMMAND_TIMEOUT     5000
+//#define COMMAND_TIMEOUT_CHECK(t, compare_to)   ( (((u32_t)((t)-(compare_to))) > COMMAND_TIMEOUT) ? 1 : 0)
 
 void mtp2_command(u8_t e1_no, u8_t command)
 {
-    static u32_t last_time[E1_LINKS_MAX] = {0};
-
     e1_no = e1_no & 7;
 
     mtp2_t *m = &mtp2_state[e1_no];
 
-    u32_t now = HAL_GetTick();
     switch (command) {
         case MTP2_ACTIVE_LINK:
             if (E1_PORT_ENABLE(e1_no)) {
-                u32_t less = now - last_time[e1_no];
-                if (less > 5000) 
-                {
-                    last_time[e1_no] = now;
-                    LOG_W("Active link'%d'", e1_no);
-                    if (m->init_down) {
-                        if (m->protocal == SS7_PROTO_TYPE) {
-                            enable_e1_transmit(e1_no);
-                            start_initial_alignment(m, "usually start!");
-                        } else if (m->protocal == PRI_PROTO_TYPE) {
-
-                        }
-                    } else {
-                        e1_port_init(e1_no);
-                    }                    
-                }
+               LOG_W("Active link'%d'", e1_no);
+               if (m->init_down) {
+                   if (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_DOWN) {
+                       //enable_e1_transmit(e1_no);
+                       start_initial_alignment(m, "usually start!");
+                   } else if (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_TEI_UNASSIGNED) {
+                       //enable_e1_transmit(e1_no);
+                       q921_start(m);
+                   }
+                } else {
+                    e1_port_init(e1_no);
+                }                    
             }
             break;
         case MTP2_DEACTIVE_LINK:
             LOG_W("Dective link'%d'", e1_no);
             if (m->init_down) {
-                if (m->protocal == SS7_PROTO_TYPE) {
+                if (m->protocal == SS7_PROTO_TYPE && m->state > MTP2_DOWN) {
                     abort_initial_alignment(m);
-                    disable_e1_transmit(e1_no);
+                    //disable_e1_transmit(e1_no);
                     m->state = MTP2_DOWN;
-                } else if (m->protocal == PRI_PROTO_TYPE) {
-                    
+                } else if (m->protocal == PRI_PROTO_TYPE && m->q921_state > Q921_TEI_UNASSIGNED) {
+                    q921_cleanup(m);
+                    //disable_e1_transmit(e1_no);
                 }
-            } else {
-                
-            }
+            } 
             break;
         case MTP2_STOP_L2:
             LOG_W("Stop link'%d'", e1_no);
             if (m->init_down) {
-                if (m->protocal == SS7_PROTO_TYPE) {
-                    disable_e1_transmit(e1_no);
+                if (m->protocal == SS7_PROTO_TYPE && m->state > MTP2_DOWN) {
+                    //disable_e1_transmit(e1_no);
                     abort_initial_alignment(m);
                     m->state = MTP2_DOWN;
-                } else if (m->protocal == PRI_PROTO_TYPE) {
-
+                } else if (m->protocal == PRI_PROTO_TYPE && m->q921_state > Q921_TEI_UNASSIGNED) {
+                    //disable_e1_transmit(e1_no);
+                    q921_cleanup(m);
                 }
-            } else {
-
-            }
+            } 
             
             break;
         case MTP2_EMERGEN_ALIGNMENT:            
             if (E1_PORT_ENABLE(e1_no)) {
-                u32_t less = now - last_time[e1_no];
-                if (less > 5000) 
-                {
-                    last_time[e1_no] = now;
-                    LOG_W("Emergent Active link'%d'", e1_no);
-                    if (m->init_down) {
-                        if (m->protocal == SS7_PROTO_TYPE) {
-                            enable_e1_transmit(e1_no);
-                            start_initial_alignment(m, "Emergent start!");
-                        } else if (m->protocal == PRI_PROTO_TYPE) {
-
-                        }
-                    } else {
-                        e1_port_init(e1_no);
-                    }               
-                }
+                LOG_W("Emergent Active link'%d'", e1_no);
+                if (m->init_down) {
+                   if (m->protocal == SS7_PROTO_TYPE && m->state == MTP2_DOWN) {
+                       //enable_e1_transmit(e1_no);
+                       start_initial_alignment(m, "Emergent start!");
+                   } else if (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_TEI_UNASSIGNED) {
+                       //enable_e1_transmit(e1_no);
+                       q921_start(m);
+                   }
+                } else {
+                    e1_port_init(e1_no);
+                }      
             }
             break;
         default:
@@ -1190,7 +1153,11 @@ void start_mtp2_process(int e1_no)
 {
     mtp2_t *m = &mtp2_state[e1_no & 7];
 
-    start_initial_alignment(m, "L1 is linkup");
+    if (m->protocal == SS7_PROTO_TYPE) {
+        start_initial_alignment(m, "L1 is linkup");
+    } else if (m->protocal == PRI_PROTO_TYPE) {
+        q921_start(m);
+    }
 }
 
 u8_t is_ccs_port(int e1_no)
