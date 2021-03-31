@@ -433,9 +433,16 @@ void restart_system(void)
 static void softreset(void)
 {
     if (ram_params.init_flag == 0xA5) {
-        load_default_param();
+        HAL_Delay(10);
+        //load_default_param();
+        e1_params.iap_value = 0xaa;
+        update_eeprom();
+        reload_eeprom();
+        LOG_W("iap value = %x", e1_params.iap_value);
+        HAL_Delay(10);
         restart_system();
     } else if (ram_params.init_flag == 0x5A) {
+        HAL_Delay(10);
         restart_system();
     }
 }
@@ -939,7 +946,7 @@ err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
 
 void send_trap_msg(u8_t dst_flag)
 {
-    dst_flag = dst_flag % 3;
+    dst_flag &= 3;
 
     for (u8_t i = 0; i < 3; i++) {
         if (i == dst_flag) {
@@ -951,17 +958,18 @@ void send_trap_msg(u8_t dst_flag)
     snmp_send_8ke1_trap(&trap_var);
 }
 
-void send_mtp2_trap_msg(void)
+void send_mtp2_trap_msg(u8_t dst_flag)
 {
-    if (plat_no == 0) {
-        trap_dst[0].enable = 1;
-        trap_dst[1].enable = 0;
-    } else {
-        trap_dst[0].enable = 0;
-        trap_dst[1].enable = 1;
+    dst_flag &= 3;
+    for (int i = 0; i < 3; i++)
+    {
+        if (i == dst_flag) {
+            trap_dst[i].enable = 1;
+        } else {
+            trap_dst[i].enable = 0;
+        }
     }
-    trap_dst[2].enable = 1;
-
+    
     snmp_send_8ke1_trap(&mtp2_trap_var);
 }
 

@@ -31,6 +31,12 @@ extern u8_t card_id;
 card_heart_t  hb_msg;
 mtp2_heart_t mtp2_heart_msg;
 
+static u8_t alarm_state[16];
+static u8_t alarm_code[16];
+static u8_t component_id[16];
+static u8_t need_alarm_omc[16];
+static u8_t active_alarm;
+
 static void send_mfc_num_to_msc(void);
 
 static char *get_other_msg_type(struct other_msg *ot_msg)
@@ -74,8 +80,6 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
     LOG_I("SN==>%s: %x[%x] <-- %x[%x]  tone_no=%d  playtime=%d", get_other_msg_type(ot_msg),
             src_slot, src_port, dst_slot, dst_port, ot_msg->tone_no, ot_msg->playtimes);
     
-    //LOG_HEX("", 16, (u8_t *)p->payload, p->tot_len);
-
     switch (ot_msg->m_head.msg_type) {
         case CON_TIME_SLOT:
             if ((slot_params[ot_msg->src_slot].connect_tone_flag & 0xf) > 0) {
@@ -131,14 +135,6 @@ static void other_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t 
             } else {                
                 toneno = ((group_user[group] >> 2) * 3 + 2) & 0xF;
                 m34116_conf_connect((group % 10) + 1, 0, toneno, 0, 4, ot_msg->src_slot, 0, 0);
-                /**
-                tmpBase = (ot_msg->src_slot >> 5) << 5;
-                for (i = tmpBase; i < tmpBase + 32; i++) {
-                    if (slot_params[i].port_to_group == group) {
-                        m34116_conf_connect((group % 10) + 1, 0, toneno, 0, 2, ot_msg->src_slot, 0, 0);
-                    }
-                }
-                **/
             }
             break;
         case CON_DISC_GRP:
@@ -197,7 +193,12 @@ static void isdn_receive(struct netconn *conn, struct pbuf *p, const ip_addr_t *
         q921_transmit_iframe(e1_no & 0x7, (void *)&isdnmsg->sio, isdnmsg->msg_len);
         LOG_HEX("SN==>ISDN", 16, p->payload, p->tot_len);
     } else if (pd == ISDN_MNG) {
-        LOG_W("Receive isdn manger message: pri=%x", isdnmsg->msg.serv_comm.command);
+        //LOG_W("Receive isdn manger message: pri=%x", isdnmsg->msg.serv_comm.command);
+        if (isdnmsg->msg.serv_comm.command == 0xFF) {
+            set_mtp2_heart_msg_dstip(isdnmsg->msg.serv_comm.dest_ip);
+        } else {
+            mtp2_command(e1_no & 7, isdnmsg->msg.serv_comm.command);
+        }
     }
 }
 
@@ -352,7 +353,7 @@ static void ss7_netconn_thread(void *arg)
   } while (1);
 }
 
-void init_slot_param(void)
+void init_param(void)
 {
     for(int i = 0; i < SLOT_MAX; i++) {
         slot_params[i].connect_tone_flag = 0xf0;
@@ -364,6 +365,15 @@ void init_slot_param(void)
         group_user[i] = 0;
     }
 
+    for(int i = 0; i < 16; i++) {
+        need_alarm_omc[i] = 0;
+        alarm_code[i] = IDLE;
+        alarm_state[i] = 0;
+        component_id[i] = 0;
+    }
+
+    active_alarm = 0;
+
     ram_params.init_flag = IDLE;
 }
 
@@ -371,7 +381,7 @@ void init_slot_param(void)
 
 void server_interface_init(void)
 {   
-    init_slot_param();
+    init_param();
 
     init_mfc_slot();
 
@@ -759,12 +769,6 @@ void mfc_scan(void)
 }
 
 /* run at 50ms period */
-u8_t alarm_state[16];
-u8_t alarm_code[16];
-u8_t component_id[16];
-u8_t need_alarm_omc[16];
-
-
 void alarm_fsm(u8_t proc)
 {
     u8_t cl;
@@ -784,6 +788,7 @@ void alarm_fsm(u8_t proc)
             send_card_heartbeat(plat_no); // send to sn
             need_alarm_omc[proc] = 1;
             alarm_state[proc] = 1;
+            active_alarm++;
         }
         break;
     case 1: // abnormal
@@ -797,7 +802,12 @@ void alarm_fsm(u8_t proc)
             hb_msg.cp_id = component_id[proc];
             hb_msg.alarm_code = 0;
             send_card_heartbeat(plat_no); // to sn
-            alarm_code[proc] = 0;
+            alarm_state[proc] = 0;
+            if (active_alarm > 0) {
+                active_alarm--;
+            } else {
+                active_alarm = 0;
+            } 
         }
         break;
     }
@@ -824,6 +834,9 @@ void alarm_fsm(u8_t proc)
         }
     } else if (proc < 11) {
         if (proc == 9) {  /* Master clock */
+            if (alarm_code[proc] != IDLE) {
+                alarm_code[proc] = IDLE;
+            }
             hb_msg.omcled[0] = 1;
         } else if (proc == 10) { /* DPLL */
             //Todo:
@@ -834,7 +847,9 @@ void alarm_fsm(u8_t proc)
             alarm_code[proc] = IDLE;
         }
     } else if (proc < 14) {
-        if ((card_id & (1 << (proc - 6))) == 0) {
+        if ((card_id & 0xf) > 1) {
+            ;
+        } else {
             if (alarm_code[proc] != IDLE) {
                 alarm_code[proc] = IDLE;
             }
@@ -907,8 +922,6 @@ void period_50ms_proc(void *arg)
     connect_tone_proc(0, 255);
     alarm_fsm(proc);
     proc = (proc + 1) & 0xF;
-
-    //sched_timeout(50, period_50ms_proc, NULL);
 }
 
 void period_20ms_proc(void *arg)
@@ -920,8 +933,6 @@ void period_20ms_proc(void *arg)
     }
 
     mfc_scan();
-
-    //sched_timeout(20, period_20ms_proc, NULL);
 }
 
 void period_500ms_proc(void *arg)
@@ -954,6 +965,7 @@ void hb_msg_init(void)
     hb_msg.hb_version[1] = 0;
     hb_msg.hb_version[2] = 0;
     hb_msg.component.cpu_loading = 19;
+    memset(hb_msg.omcled, 0xff, 8);
 }
 
 void send_card_heartbeat(u8_t dst_flag)
@@ -961,14 +973,34 @@ void send_card_heartbeat(u8_t dst_flag)
 
     hb_msg.sys_id = (card_id >> 4) & 1;
     hb_msg.subsys_id = card_id & 0xF;
-    hb_msg.timestamp = PP_HTONL(ram_params.timestamp);
+    hb_msg.hbextLen = 49;
+    hb_msg.reserved = 0;
+    hb_msg.timestamp = ram_params.timestamp;
 
     hb_msg.component.e1_install = e1_params.e1_enable[card_id & 0xF];
-    hb_msg.component.e1_l2_install_fg = 0;
+    hb_msg.component.e1_l2_install_fg = e1_params.e1_l2_alarm_enable[card_id & 0xF];
     hb_msg.component.e1_l2_alarm = ram_params.e1_l2_alarm;
     hb_msg.component.e1_l1_alarm = ram_params.e1_l1_alarm;
+    hb_msg.component.echo_fg = 0;
+    if (e1_params.pll_src[card_id & 0xF] >= E1_PORT_PER_CARD) {
+        hb_msg.component.src_clk = E1_PORT_PER_CARD - 1;
+    } else {
+        if ((ram_params.e1_l1_alarm >> e1_params.pll_src[card_id & 0xf]) & 1) {
+            /* signal lost */
+            hb_msg.component.src_clk = E1_PORT_PER_CARD - 1;
+        } else {
+            hb_msg.component.src_clk = 0;
+        }
+    }
+    hb_msg.component.freq = 0x3d;
+    hb_msg.component.master_clk_fg = 2;
 
     send_trap_msg(dst_flag);
+
+    if (active_alarm == 0) {
+        hb_msg.cp_id = 0;
+        hb_msg.alarm_code = 0;
+    }
 }
 
 void mtp2_heart_msg_init(void)
@@ -979,11 +1011,12 @@ void mtp2_heart_msg_init(void)
     memset(mtp2_heart_msg.dst_ip, 0xff, 8);
     memset(mtp2_heart_msg.retrieved_bsnt, 0x80, 8);
     mtp2_heart_msg.mtp2_soft_version = 0x50;
+    memset(mtp2_heart_msg.sysnc_clock, 0, 16);
+    mtp2_heart_msg.mtp2_mode = 0;
 }
 
 void set_mtp2_heart_msg_dstip(u8_t *dstip)
 {
-    //memcpy(mtp2_heart_msg.dst_ip, dstip, 8);
     for (int i = 0; i < 8; i++) {
         if (dstip[i] == 0xEE) {
             mtp2_heart_msg.dst_ip[i] = 0xFF;
@@ -1016,11 +1049,11 @@ void link_in_service(int e1_no)
     mtp2_heart_msg.mtp2_mode = e1_params.mtp2_error_check[card_id & 0x0f];
 
     LOG_I("Link '%d' is in service:", e1_no);
-    LOG_D("link '%d' l1_status = %x", e1_no, mtp2_heart_msg.l1_status);
-    LOG_D("link '%d' l2_status=%d", e1_no, l2_alarm_to_state(e1_no));
-    //LOG_D("e1_port type = %X", e1_params.e1_port_type[card_id & 0x0f]);
-    //LOG_D("nt type = %X", e1_params.isdn_port_type[card_id & 0x0f]);
-    send_mtp2_trap_msg();    
+
+    mtp_in_service_checkout(e1_no);
+
+    send_mtp2_trap_msg(plat_no); 
+    send_mtp2_trap_msg(TO_OMC);   
 }
 
 void link_outof_service(int e1_no, u8_t alarm_code)
@@ -1031,66 +1064,59 @@ void link_outof_service(int e1_no, u8_t alarm_code)
 
     mtp2_heart_msg.l1_status = ~ram_params.e1_l1_alarm;
     mtp2_heart_msg.l2_status[e1_no & 7] = l2_alarm_to_state(e1_no);
-    //mtp2_heart_msg.retrieved_bsnt =  0;
+   
+    LOG_W("Link '%d' is out of service:", e1_no);
 
-    send_mtp2_trap_msg();
+    send_mtp2_trap_msg(plat_no);
+    send_mtp2_trap_msg(TO_OMC);   
 }
 
-static void update_heartbeat_msg(void)
+
+void period_1s_proc(void *arg)
 {
-    hb_msg.timestamp = ram_params.timestamp;
-    mtp2_heart_msg.timestamp = ram_params.timestamp;
-
-    for (int i = 0; i < E1_LINKS_MAX; i++) {
-        if (ram_params.e1_l2_alarm & (1 << i)) {
-            mtp2_heart_msg.led_ctl_code[i] = LED_IN_SERVICE;
-            mtp2_heart_msg.l2_status[i] = MTP2_STATE_WORKING;
-            hb_msg.omcled[i] = LED_IN_SERVICE;
-        } else {
-            mtp2_heart_msg.led_ctl_code[i] = LED_ALIGNMENT;
-            mtp2_heart_msg.l2_status[i] = MTP2_STATE_ASSIGN;
-            hb_msg.omcled[i] = LED_ALIGNMENT;
-        }
-        
-    }
-
-    mtp2_heart_msg.alarm_code = ALARM_IN_SERVICE;
-    mtp2_heart_msg.l1_status = ~(ram_params.e1_l1_alarm);
-    mtp2_heart_msg.e1_port_type = e1_params.e1_port_type[card_id & 0x0f];
-    mtp2_heart_msg.is_NT = e1_params.isdn_port_type[card_id & 0x0f];
-    mtp2_heart_msg.mtp2_mode = e1_params.mtp2_error_check[card_id & 0x0f];
-}
-
-void period_10s_proc(void *arg)
-{
-    static u8_t pingpang = TO_OMC;
+    static u8_t hb_chl = 0;
+    u8_t dest_flag = IDLE;
 
     (void)arg;
 
-    update_heartbeat_msg();
-    
-    if (pingpang == TO_OMC) {
-        send_card_heartbeat(pingpang);
-        pingpang = plat_no;
-    } else {
-        send_card_heartbeat(pingpang);
-        pingpang = TO_OMC;
+    mtp2_heart_msg.timestamp = ram_params.timestamp;
+    if (hb_chl < E1_PORT_PER_CARD) {
+        if (l2_alarm_to_state(hb_chl) == MTP2_STATE_WORKING) {
+            mtp2_heart_msg.alarm_component = hb_chl;
+            mtp2_heart_msg.alarm_code = ALARM_IN_SERVICE;
+        }
+        dest_flag = plat_no;
+    } else if (hb_chl == E1_PORT_PER_CARD) {
+        /*send to omc */
+        dest_flag = TO_OMC;
     }
 
-    send_mtp2_trap_msg();
+    mtp2_heart_msg.l1_status = ~ram_params.e1_l1_alarm;
+    for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+        if (ram_params.e1_l2_alarm & (1 << i)) {
+            mtp2_heart_msg.led_ctl_code[i] = LED_IN_SERVICE;
+            mtp2_heart_msg.l2_status[i] = MTP2_STATE_WORKING;
+        } else {
+            mtp2_heart_msg.led_ctl_code[i] = LED_ALIGNMENT;
+            mtp2_heart_msg.l2_status[i] = MTP2_STATE_ASSIGN;
+        }
+    }
 
-    //sched_timeout(10000, period_10s_proc, NULL);
-}
+    mtp2_heart_msg.e1_port_type = e1_params.e1_port_type[card_id & 0x0f];
+    mtp2_heart_msg.is_NT = e1_params.isdn_port_type[card_id & 0x0f];
+    mtp2_heart_msg.mtp2_mode = e1_params.mtp2_error_check[card_id & 0x0f];
 
-void start_period_proc(void)
-{
-    period_50ms_proc(NULL);
+    if (dest_flag != IDLE) {
+        send_mtp2_trap_msg(dest_flag);
+    }
 
-    period_20ms_proc(NULL);
+    if (hb_chl == 0) {
+        send_card_heartbeat(plat_no);
+    } else if (hb_chl == 9) {
+        send_card_heartbeat(TO_OMC);
+    }
 
-    period_500ms_proc(NULL);
-
-    //period_10s_proc(NULL);
+    hb_chl = (hb_chl + 1) % 10;
 }
 
 void update_e1_enable(u8_t new_value)

@@ -62,7 +62,7 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(ETH_EN_GPIO_Port, ETH_EN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(CLOCK_EN_GPIO_Port, CLOCK_EN_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(CLOCK_EN_GPIO_Port, CLOCK_EN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : PF7 PF8 PF9 PF10 */
   GPIO_InitStruct.Pin = GPIO_PIN_7|GPIO_PIN_8|GPIO_PIN_9|GPIO_PIN_10;

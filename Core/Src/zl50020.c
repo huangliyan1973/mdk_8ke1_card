@@ -10,6 +10,7 @@
 #include "eeprom.h"
 #include "lwip/def.h"
 #include "ds26518.h"
+#include "server_interface.h"
 
 #define LOG_TAG              "switch"
 #define LOG_LVL              LOG_LVL_DBG
@@ -499,8 +500,10 @@ void read_zl50020_data_mem(u8_t stream_no, u8_t slot, u8_t test_value)
     dev->cr = 0x84;
     if (err_count < 5) {
         LOG_W("Read ZL50020 Data value is ok for test_value : %x, errs=%d", test_value, err_count);
-    }else
+    }else {
         LOG_E("Read ZL50020 Data value has too err, count = %d", err_count);
+        restart_system();
+    }
     LOG_HEX("", 16, data, 300);
 }
 

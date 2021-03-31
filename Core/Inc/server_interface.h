@@ -192,10 +192,6 @@ extern void server_interface_init(void);
 
 extern void update_no1_e1(u8_t new_value);
 
-extern void period_10s_proc(void *arg);
-
-extern void start_period_proc(void);
-
 extern void snmp_8ke1_init(void);
 
 extern void hb_msg_init(void);
@@ -205,7 +201,7 @@ extern void link_in_service(int e1_no);
 
 extern void link_outof_service(int e1_no, u8_t alarm_code);
 
-extern void send_mtp2_trap_msg(void);
+extern void send_mtp2_trap_msg(u8_t dst_flag);
 
 extern void set_mtp2_heart_msg_dstip(u8_t *dstip);
 
@@ -225,6 +221,8 @@ extern void period_20ms_proc(void *arg);
 
 extern void period_500ms_proc(void *arg);
 
-extern void period_10s_proc(void *arg);
+extern void period_1s_proc(void *arg);
+
+extern void restart_system(void);
 
 #endif /* INC_CSU_IF_H_ */

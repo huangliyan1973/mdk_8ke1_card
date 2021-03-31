@@ -49,6 +49,8 @@ typedef struct {
         u8_t pc2[3];      
     }pc_magic[E1_PORT_PER_CARD];
     
+	u8_t   	reserved[128]; // contain for future purpose.
+	u8_t 	iap_value;
     
 } e1_params_t;
 

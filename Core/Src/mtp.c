@@ -123,9 +123,6 @@ static void mtp2_t4_timeout(void *arg)
     m->state = MTP2_READY;
     sched_timeout(T1_TIMEOUT, mtp2_t1_timeout, m);
 
-    //ram_params.e1_l2_alarm |= (1 << m->e1_no);
-    //link_in_service(m->e1_no);
-
     sched_timeout(50000, test_5s_timeout, m);
 }
 
@@ -1171,6 +1168,15 @@ u8_t is_ccs_port(int e1_no)
         return 0;
 
     return 1;
+}
+
+void mtp_in_service_checkout(int e1_no)
+{
+    mtp2_t *m = &mtp2_state[e1_no & 7];
+
+    while (sched_timeout_is_exist(mtp2_t2_timeout, m) > 0) {
+        sched_untimeout(mtp2_t2_timeout, m);
+    }
 }
 
 void check_memory(void)

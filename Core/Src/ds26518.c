@@ -990,7 +990,8 @@ void ds26518_test(void)
 	
 	FRAMER *f = ds26518_global_framer();
 
-	ds26518_global_init();
+	if ((card_id & 0xf) != 0)
+		ds26518_global_init();
 
 	init_mtp2_mem();
 

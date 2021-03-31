@@ -221,8 +221,8 @@ static void sched_timeout_thread(void *arg)
             period_500ms_proc(NULL);
         }
 
-        if ((time_tick % 1000) == 0) {
-            period_10s_proc(NULL);
+        if ((time_tick % 100) == 0) {
+            period_1s_proc(NULL);
         }
         
         sched_check_timeouts();

@@ -327,6 +327,8 @@ extern uint8_t is_ccs_port(int e1_no);
 
 extern void start_mtp2_process(int e1_no);
 
+extern void mtp_in_service_checkout(int e1_no);
+
 extern void check_memory(void);
 
 //#define LOCK_MTP2_CORE()	sys_mutex_lock(&lock_mtp_core)

@@ -197,6 +197,11 @@ void load_default_param(void)
     }
     
     init_tone_cadence();
+
+    memset((void *)&e1_params.reserved[0], 0, 128);
+    
+    e1_params.iap_value = 0;
+
     update_eeprom();
 }
 

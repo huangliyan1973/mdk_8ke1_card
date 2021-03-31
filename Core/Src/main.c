@@ -40,6 +40,8 @@
 #define LOG_LVL              LOG_LVL_DBG
 #include "ulog.h"
 
+#define __IAP__
+
 extern u8_t get_card_id(void);
 /* USER CODE END Includes */
 
@@ -96,7 +98,10 @@ void MX_FREERTOS_Init(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
-
+#ifdef __IAP__
+  #define VECT_TAB_OFFSET  0x10000
+  SCB->VTOR = FLASH_BASE | VECT_TAB_OFFSET;
+#endif
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -112,7 +117,7 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-	//HAL_Delay(1000);
+	
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
@@ -121,31 +126,27 @@ int main(void)
   MX_USART1_UART_Init();
   MX_I2C1_Init();
   /* USER CODE BEGIN 2 */
-  HAL_Delay(1000);
+  if ((card_id & 0xf) == 0) {
+    ds26518_global_init();
+  }
 
   check_master_clk();
 
   ulog_console_backend_init();
 
-  printf("\n\n>>>>>>System run at %d frequence!<<<<<<\n", SystemCoreClock);
-
-  led_test();
+  printf("\n\n>>>>>>System run at %d frequence!<<<<<<\n", SystemCoreClock); 
   
   sram_test();
 
   ds26518_test();
-
-  //m34116_zl50020_test(2);
   
   module_test();
-  
-  HAL_Delay(1000);
 
   zl50020_test();
-
-  //ds26518_monitor_test(0, 0);
     
   init_eeprom();
+
+  led_test();
   
   /* USER CODE END 2 */
 
