@@ -1048,12 +1048,12 @@ void link_in_service(int e1_no)
     mtp2_heart_msg.is_NT = e1_params.isdn_port_type[card_id & 0x0f];
     mtp2_heart_msg.mtp2_mode = e1_params.mtp2_error_check[card_id & 0x0f];
 
-    LOG_I("Link '%d' is in service:", e1_no);
-
     mtp_in_service_checkout(e1_no);
 
     send_mtp2_trap_msg(plat_no); 
     send_mtp2_trap_msg(TO_OMC);   
+
+    LOG_I("Link '%d' is in service:", e1_no);
 }
 
 void link_outof_service(int e1_no, u8_t alarm_code)
@@ -1113,7 +1113,7 @@ void period_1s_proc(void *arg)
     if (hb_chl == 0) {
         send_card_heartbeat(plat_no);
     } else if (hb_chl == 9) {
-        send_card_heartbeat(TO_OMC);
+        //send_card_heartbeat(TO_OMC);
     }
 
     hb_chl = (hb_chl + 1) % 10;

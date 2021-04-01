@@ -10,7 +10,12 @@
 #include "lwip/def.h"
 #include "lwip/api.h"
 #include "shell_port.h"
-#include "lffifo.h"
+#include "server_interface.h"
+#include "ds26518.h"
+#include "zl50020.h"
+#include "eeprom.h"
+
+//#include "lffifo.h"
 #include "ulog.h"
 
 Shell shell;
@@ -19,7 +24,7 @@ char shellBuffer[512];
 
 #define BUFSIZE     1024
 
-static struct lffifo *telnet_rev_buf = NULL;
+//static struct lffifo *telnet_rev_buf = NULL;
 static struct netconn *telnet_conn = NULL;
 
 void telnetShellWrite(char data)
@@ -29,7 +34,7 @@ void telnetShellWrite(char data)
     }
 }
 
-
+#if 0
 signed char telnetShellRead(char *data)
 {
     static u8_t rev_buf[128] = {0};
@@ -54,11 +59,12 @@ start:
     
     return -1;
 }
+#endif
 
 void userShellInit(void)
 {
     shell.write = telnetShellWrite;
-    shell.read = telnetShellRead;
+    //shell.read = telnetShellRead;
     shellInit(&shell, shellBuffer, 512);
 }
 
@@ -66,12 +72,17 @@ static void shell_main(struct netconn *conn)
 {
     struct pbuf *p;
     err_t ret;
+    u8_t *data;
 
     do {
         ret = netconn_recv_tcp_pbuf(conn, &p);
         if (ret == ERR_OK) {
-            lffifo_put(telnet_rev_buf, (u8_t *)p->payload, p->tot_len);
+            //lffifo_put(telnet_rev_buf, (u8_t *)p->payload, p->tot_len);
             netconn_write(conn, (const void *)p->payload, p->tot_len, NETCONN_NOCOPY);
+            data = (u8_t *)p->payload;
+            for(int i = 0; i < p->tot_len; i++) {               
+                shellHandler(&shell, data[i]);
+            }
             pbuf_free(p);
         }
 
@@ -117,8 +128,8 @@ static void shell_thread(void *arg)
     err = netconn_listen(conn);
     LWIP_ERROR("shell: netconn_listen failed", (err == ERR_OK), netconn_delete(conn); return;);
 
-    telnet_rev_buf = lffifo_alloc(BUFSIZE);
-    LWIP_ERROR("shell: telnet rev buf failed", (telnet_rev_buf != NULL), netconn_delete(conn); return;);
+    //telnet_rev_buf = lffifo_alloc(BUFSIZE);
+    //LWIP_ERROR("shell: telnet rev buf failed", (telnet_rev_buf != NULL), netconn_delete(conn); return;);
 
     for (;;) {
         err = netconn_accept(conn, &telnet_conn);
@@ -137,3 +148,12 @@ void shell_init(void)
 {
     sys_thread_new("shell_thread", shell_thread, NULL, DEFAULT_THREAD_STACKSIZE, DEFAULT_THREAD_PRIO);
 }
+
+void update_software(void)
+{
+    e1_params.iap_value = 0xaa;
+    update_eeprom();
+    restart_system();
+}
+
+SHELL_EXPORT_CMD(SHELL_CMD_PERMISSION(0)|SHELL_CMD_TYPE(SHELL_TYPE_CMD_FUNC), update, update_software, update 8Ke1 software);
