@@ -876,6 +876,13 @@ void alarm_fsm(u8_t proc)
     }
 }
 
+static char *display_l1_status(int e1_no)
+{
+    e1_no &= 7;
+    u8_t status = (ram_params.e1_l1_alarm >> e1_no) & 1;
+    return status == 1 ? "0" : "1";
+}
+
 void update_e1_l1_status(void)
 {
     static u8_t l1_st = 0;
@@ -890,10 +897,20 @@ void update_e1_l1_status(void)
     ram_params.e1_l1_alarm = l1_status & (~(ram_params.conf_module_installed << 1));
 
     if (l1_st != l1_status) {
-        LOG_W("card l1_lararm = %x, l1_status = %x", ram_params.e1_l1_alarm, l1_status);
+        LOG_I("'%x' Card L1 status changed!", card_id);
+        LOG_W("Link0:'%s'  Link1:'%s'  Link2:'%s'  Link3:'%s'\n\tLink4:'%s'  Link5:'%s'  Link6:'%s'  Link7:'%s'",
+            display_l1_status(0),display_l1_status(1),display_l1_status(2),display_l1_status(3),
+            display_l1_status(4),display_l1_status(5),display_l1_status(6),display_l1_status(7));
         l1_st = l1_status;
     }
 
+}
+
+static char *display_l2_status(int e1_no)
+{
+    e1_no &= 7;
+    u8_t status = (ram_params.e1_l2_alarm >> e1_no) & 1;
+    return status == 1 ? "1" : "0";
 }
 
 void update_e1_l2_status(void)
@@ -908,7 +925,10 @@ void update_e1_l2_status(void)
     ram_params.e1_l2_alarm = l2_status | (ram_params.conf_module_installed << 1);
 
     if (l2_st != l2_status) {
-        LOG_W("card l2_lararm = %x, l2_status = %x", ram_params.e1_l2_alarm, l2_status);
+        LOG_I("'%x' Card L2 status changed!", card_id);
+        LOG_W("Link0:'%s'  Link1:'%s'  Link2:'%s'  Link3:'%s'\nLink4:'%s'  Link5:'%s'  Link6:'%s'  Link7:'%s'",
+            display_l2_status(0),display_l2_status(1),display_l2_status(2),display_l2_status(3),
+            display_l2_status(4),display_l2_status(5),display_l2_status(6),display_l2_status(7));
         l2_st = l2_status;
     }
 }
@@ -1113,7 +1133,7 @@ void period_1s_proc(void *arg)
     if (hb_chl == 0) {
         send_card_heartbeat(plat_no);
     } else if (hb_chl == 9) {
-        //send_card_heartbeat(TO_OMC);
+        send_card_heartbeat(TO_OMC);
     }
 
     hb_chl = (hb_chl + 1) % 10;

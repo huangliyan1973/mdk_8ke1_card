@@ -109,8 +109,8 @@ static void test_5s_timeout(void *arg)
     LOG_I("E1 '%d' send SINs=%d, received SINs=%d, send FISUs=%d, reivced FISUs=%d, miss_fisu=%d",
         m->e1_no, m->sin_scount, m->sin_rcount, m->fisu_scount, m->fisu_rcount, m->miss_fisu_count);
 
-    if (m->sccp_flag)
-        sched_timeout(50000, test_5s_timeout, m);
+    //if (m->sccp_flag)
+    //    sched_timeout(50000, test_5s_timeout, m);
 }
 
 /* Q.703 timer T4 "proving period" - proving time before ending own initial
@@ -1130,7 +1130,8 @@ u8_t read_l2_status(int e1_no)
         return 1;
     }
 
-    if (m->protocal == PRI_PROTO_TYPE && m->q921_state == Q921_MULTI_FRAME_ESTABLISHED) {
+    if (m->protocal == PRI_PROTO_TYPE && (m->q921_state == Q921_MULTI_FRAME_ESTABLISHED ||
+        m->q921_state == Q921_TIMER_RECOVERY)) {
         return 1;
     }
 

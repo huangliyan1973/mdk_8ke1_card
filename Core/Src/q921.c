@@ -117,11 +117,15 @@ static const char *q921_state2str(enum q921_state state)
 
 static void q921_setstate(mtp2_t *m, int newstate)
 {
-
-	LOG_D("%d E1 Changing from state %d(%s) to %d(%s)",
+	enum q921_state  new_state = (enum q921_state)newstate;
+	if ((new_state == Q921_TIMER_RECOVERY && m->q921_state == Q921_MULTI_FRAME_ESTABLISHED) ||
+		(new_state == Q921_MULTI_FRAME_ESTABLISHED && m->q921_state == Q921_TIMER_RECOVERY)) {
+			;
+		} else {
+			LOG_W("%d E1 Changing from state %d(%s) to %d(%s)",
 					m->e1_no, m->q921_state, q921_state2str(m->q921_state),
 					newstate, q921_state2str((enum q921_state)newstate));
-
+		}
 	m->q921_state = (enum q921_state)newstate;
 }
 
@@ -816,7 +820,7 @@ int q921_transmit_iframe(u8_t e1_no, void *buf, int len /*, int cr*/)
 	case Q921_ASSIGN_AWAITING_TEI:
 	case Q921_AWAITING_RELEASE:
 	default:
-		LOG_W("%d E1 Cannot transmit frames in state %d(%s)", m->e1,
+		LOG_W("%d E1 Cannot transmit frames in state %d(%s)", m->e1_no,
 			m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
@@ -917,7 +921,7 @@ static void q921_rr(mtp2_t *m, int pbit, int cmd)
 		LOG_W("Don't know how to RR on a type %d node", m->pri_mode);
 		return;
 	}
-	LOG_I("%d E1 --Sending RR N(R)=%d, v_s=%d, v_a=%d", m->e1_no, m->v_r, m->v_s, m->v_a);
+	//LOG_I("%d E1 --Sending RR N(R)=%d, v_s=%d, v_a=%d", m->e1_no, m->v_r, m->v_s, m->v_a);
 	q921_transmit(m, &h, 4);
 }
 
