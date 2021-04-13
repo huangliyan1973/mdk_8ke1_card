@@ -1286,6 +1286,7 @@ static int q921_sabme_rx(mtp2_t *m, q921_h *h)
 		stop_t200(m);
 		start_t203(m);
 		m->v_s = m->v_a = m->v_r = 0;
+
 		if (m->q921_state == Q921_TIMER_RECOVERY) {
 			q921_setstate(m, Q921_MULTI_FRAME_ESTABLISHED);
 		}
@@ -1295,6 +1296,7 @@ static int q921_sabme_rx(mtp2_t *m, q921_h *h)
 		q921_send_ua(m, h->u.p_f);
 		q921_clear_exception_conditions(m);
 		m->v_s = m->v_a = m->v_r = 0;
+
 		/* DL-ESTABLISH indication */
 		delay_q931_dl_event = Q931_DL_EVENT_DL_ESTABLISH_IND;
 
@@ -1475,7 +1477,7 @@ static int n_r_is_valid(mtp2_t *m, int n_r)
 static int q921_invoke_retransmission(mtp2_t *m, int n_r)
 {
 	if (m->v_s != n_r) {
-		m->v_s = Q921_DEC(n_r);
+		m->v_s = n_r;
 		m->retrans_seq = m->v_s;
 		LOG_W("%d E1: Start retrans misson, V_S=%d", m->e1_no,m->v_s);
 	}
@@ -1680,6 +1682,7 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 {
 	//int res = 0;
 	int delay_q931_receive;
+	u8_t tmp_flag = 0;
 
 	switch (m->q921_state) {
 	case Q921_TIMER_RECOVERY:
@@ -1690,9 +1693,9 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 			/* DEVIATION: Handle own rx busy */
 		} else if (h->i.n_s == m->v_r) {
 			Q921_INC(m->v_r);
-
+			m->bad_n_s_count = 0;	
 			m->reject_exception = 0;
-
+			tmp_flag = 1;
 			/*
 			 * Dump Q.931 message where Q.921 says to queue it to Q.931 so if
 			 * Q.921 is dumping its frames they will be in the correct order.
@@ -1714,8 +1717,9 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 				}
 			} else {
 				m->reject_exception = 1;
+				tmp_flag = 1;
 				q921_reject(m, h->i.p_f);
-				m->acknowledge_pending = 0;
+				m->acknowledge_pending = 0;			
 				q921_dump(m, h, len, 1, 0);
 			}
 		}
@@ -1724,6 +1728,7 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 			n_r_error_recovery(m);
 			q921_setstate(m, Q921_AWAITING_ESTABLISHMENT);
 		} else {
+			
 			if (m->q921_state == Q921_TIMER_RECOVERY) {
 				update_v_a(m, h->i.n_r);
 			} else {
@@ -1731,9 +1736,26 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 					update_v_a(m, h->i.n_r);
 				} else {
 					if (h->i.n_r == m->v_s) {
+						q921_dump(m, h, len, 1, 0);
 						update_v_a(m, h->i.n_r);
 						stop_t200(m);
 						start_t203(m);
+
+						if (tmp_flag == 0 && h->i.n_s != m->v_r)
+						{
+							LOG_W("Possible for 31 isdn part!, ns=%d, vr=%d", h->i.n_s, m->v_r);
+							m->v_r = (h->i.n_s + 1) % 128;
+							m->bad_n_s_count = 0;	
+							m->reject_exception = 0;
+							delay_q931_receive = 1;
+							if (h->i.p_f) {
+								q921_rr(m, 1, 0);
+								m->acknowledge_pending = 0;
+							} else {
+								m->acknowledge_pending = 1;
+							}
+						}
+
 					} else {
 						if (h->i.n_r != m->v_a) {
 							update_v_a(m, h->i.n_r);

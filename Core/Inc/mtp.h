@@ -256,6 +256,8 @@ typedef struct mtp2_state{
 	/*! V(R) - Next I-frame sequence number expected to receive */
 	uint8_t v_r;
 
+	uint8_t bad_n_s_count;
+
 	struct {
 		uint16_t len;
 		uint8_t buf[U_S_PCK_SIZE];

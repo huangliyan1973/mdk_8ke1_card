@@ -106,8 +106,8 @@ static void mtp2_send_sltm(mtp2_t *m)
 static void test_5s_timeout(void *arg)
 {
     mtp2_t *m = (mtp2_t *)arg;
-    LOG_I("E1 '%d' send SINs=%d, received SINs=%d, send FISUs=%d, reivced FISUs=%d, miss_fisu=%d",
-        m->e1_no, m->sin_scount, m->sin_rcount, m->fisu_scount, m->fisu_rcount, m->miss_fisu_count);
+    LOG_I("E1 '%d' send SINs=%d, received SINs=%d, send FISUs=%d, reivced FISUs=%d",
+        m->e1_no, m->sin_scount, m->sin_rcount, m->fisu_scount, m->fisu_rcount);
 
     //if (m->sccp_flag)
     //    sched_timeout(50000, test_5s_timeout, m);

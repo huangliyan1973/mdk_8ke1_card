@@ -209,9 +209,9 @@ static void sched_timeout_thread(void *arg)
 
         time_tick++;
 
-        if ((time_tick % 2) == 0) {
+        //if ((time_tick % 2) == 0) {
             period_20ms_proc(NULL);
-        }
+        //}
 
         if ((time_tick % 5) == 0) {
             period_50ms_proc(NULL);

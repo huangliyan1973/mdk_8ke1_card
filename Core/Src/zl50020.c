@@ -834,7 +834,7 @@ void conf_module_detect(void)
     m34116_mode();
     m34116_conf_connect(10, 0, 2, 0, 0, 1, 1, 0);
     if (m34116_status(1) == 10) {
-        m34116_disconnect(1);
+        m34116_disconnect(10);
         ram_params.conf_module_installed = 1;
         LOG_I("CONF MODULE INSTALLED!");
     } else {

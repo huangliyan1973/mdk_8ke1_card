@@ -400,11 +400,17 @@ void send_ss7_msg(u8_t link_no, u8_t *buf, u8_t len)
         return;
 
     struct netbuf *net_buf = netbuf_new();
+    if (net_buf == NULL) {
+        LOG_W("Can't alloc netbuf for send SS7 message!");
+        return;
+    }
+
     u16_t tot_len = sizeof(struct ss7_msg) + len - 1; /* delete ss7_msg.contents[0] len */
 
     struct ss7_msg *sig_msg = (struct ss7_msg *)netbuf_alloc(net_buf, tot_len);
     if (sig_msg == NULL) {
-        LOG_W("failed to alloc memory for SS7 mssage.");
+        LOG_W("failed to alloc memory for SS7 message.");
+        netbuf_delete(net_buf);
         return;
     }
 
@@ -456,11 +462,16 @@ void send_other_msg(struct other_msg *msg, u8_t len)
         return;
 
     struct netbuf *net_buf = netbuf_new();
+    if (net_buf == NULL) {
+        LOG_W("Can't alloc netbuf for send CONTROL message!");
+        return;
+    }
     u16_t tot_len = sizeof(struct other_msg) + len;
 
     struct other_msg *send_msg = (struct other_msg *)netbuf_alloc(net_buf, tot_len);
     if (send_msg == NULL) {
-        LOG_E("failed to alloc memory for control mssage");
+        LOG_E("failed to alloc memory for control message!");
+        netbuf_delete(net_buf);
         return;
     }
 
@@ -485,11 +496,17 @@ void send_isdn_msg(u8_t link_no, u8_t *buf, u8_t len)
         return;
 
     struct netbuf *net_buf = netbuf_new();
+    if (net_buf == NULL) {
+        LOG_W("Can't alloc netbuf for send ISDN message!");
+        return;
+    }
+
     u16_t tot_len = sizeof(struct server_msg) + len - 2;
 
     struct server_msg *isdn_msg = (struct server_msg *)netbuf_alloc(net_buf, tot_len);
     if (isdn_msg == NULL) {
-        LOG_E("failed to alloc memory for ISDN mssage");
+        LOG_E("failed to alloc memory for ISDN message!");
+        netbuf_delete(net_buf);
         return;
     }
 

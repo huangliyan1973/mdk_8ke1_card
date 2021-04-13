@@ -332,13 +332,30 @@ static err_t snmp_prepare_outbound_frame(struct snmp_request *request)
     return ERR_OK;
 }
 
+static void print_oid_value(struct snmp_varbind *vb)
+{
+    char oid[200] = {0};
+    u8_t offset = 0;
+
+    LOG_I("Now got oid len = %d, check it now!", vb->oid.len);
+    for (int i = 0; i < vb->oid.len; i++)
+    {
+        offset += sprintf(&oid[offset], "%d.", vb->oid.id[i]);        
+    }
+    LOG_I("OID = %s", oid);
+}
+
 static snmp_err_t snmp_oid_check(struct snmp_varbind *vb)
 {
+    print_oid_value(vb);
+
     if (((int)(vb->oid.len) - (int)e1_oid_len) < 3) {
+        LOG_E("Error in oid len");
         return SNMP_ERR_NOSUCHINSTANCE;
     }
     
     if (snmp_oid_compare(vb->oid.id, e1_oid_len, e1_oid_base, e1_oid_len) != 0) {
+        LOG_E("Error oid different with E1 oid");
         return SNMP_ERR_NOSUCHINSTANCE;
     }
     
