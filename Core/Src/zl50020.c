@@ -900,7 +900,7 @@ u8_t mfc_t32_zl50020_test(u8_t test_value)
     }
   
     //connect_slot(0, TONE_E1, test_value, TONE_E1);
-    cml->sto_connect[MFC_STREAM][0] = (TONE_STREAM << 9) | ((test_value & 0xf) << 1);
+    cml->sto_connect[MFC_STREAM][0] = (MODULE_START_STREAM << 9) | (((test_value & 0xf) + TONE_START_SLOT) << 1);
     HAL_Delay(100);
     u8_t read_value = read_dtmf(0);
     LOG_I("write=%x\tread=%x", test_value, read_value);

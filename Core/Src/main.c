@@ -139,10 +139,10 @@ int main(void)
   sram_test();
 
   ds26518_test();
-  
-  module_test();
 
   zl50020_test();
+  
+  module_test();  
     
   init_eeprom();
 
