@@ -21,9 +21,12 @@
 #include "mtp.h"
 #include "eeprom.h"
 #include "server_interface.h"
-#include "card_debug.h"
+#include "sched.h"
+#include "mtp2_def.h"
 
-#define MTP_DEBUG                1
+#define LOG_TAG              "isdn"
+#define LOG_LVL              LOG_LVL_DBG
+#include "ulog.h"
 
 #define Q921_INIT(fr, l_sapi, l_tei) \
 	do { \
@@ -114,11 +117,15 @@ static const char *q921_state2str(enum q921_state state)
 
 static void q921_setstate(mtp2_t *m, int newstate)
 {
-
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1 Changing from state %d(%s) to %d(%s)\r\n",
+	enum q921_state  new_state = (enum q921_state)newstate;
+	if ((new_state == Q921_TIMER_RECOVERY && m->q921_state == Q921_MULTI_FRAME_ESTABLISHED) ||
+		(new_state == Q921_MULTI_FRAME_ESTABLISHED && m->q921_state == Q921_TIMER_RECOVERY)) {
+			;
+		} else {
+			LOG_W("%d E1 Changing from state %d(%s) to %d(%s)",
 					m->e1_no, m->q921_state, q921_state2str(m->q921_state),
-					newstate, q921_state2str((enum q921_state)newstate)));
-
+					newstate, q921_state2str((enum q921_state)newstate));
+		}
 	m->q921_state = (enum q921_state)newstate;
 }
 
@@ -129,8 +136,8 @@ void q931_dl_event(mtp2_t *m, enum Q931_DL_EVENT event)
 
 static void q921_discard_iqueue(mtp2_t *m)
 {
-	m->retrans_last_acked = 0x7f;
-	m->retrans_last_sent = 0x7f;
+	m->retrans_last_acked = 0;
+	m->retrans_last_sent = 0;
 	m->retrans_seq = -1;
 	m->tx_len = 0;
 }
@@ -146,23 +153,20 @@ void q921_pick_frame(mtp2_t *m)
 
 	if(m->retrans_seq != -1) {
 		/* Need send I frame. */
-		if (m->q921_state != Q921_MULTI_FRAME_ESTABLISHED) {
-			CARD_DEBUGF(MTP_DEBUG, (
-				"%d E1: TEI=%d Just queued I-frame since in state %d(%s)\r\n",
+		if (m->q921_state != Q921_MULTI_FRAME_ESTABLISHED && m->q921_state != Q921_TIMER_RECOVERY) {
+			LOG_W("%d E1: TEI=%d Just queued I-frame since in state %d(%s)",
 				m->e1_no, m->tei,
-				m->q921_state, q921_state2str(m->q921_state)));
+				m->q921_state, q921_state2str(m->q921_state));
 			return;
 		}
 		if (m->peer_rx_busy) {
-			CARD_DEBUGF(MTP_DEBUG, (
-				"%d E1: TEI=%d Just queued I-frame due to peer busy condition\r\n",
-				m->e1_no, m->tei));
+			LOG_W("%d E1: TEI=%d Just queued I-frame due to peer busy condition",
+				m->e1_no, m->tei);
 			return;
 		}
 		if (m->v_s == Q921_ADD(m->v_a, 7)) {
-			CARD_DEBUGF(MTP_DEBUG, (
-				"%d E1:TEI=%d Couldn't transmit I-frame at this time due to window shut\r\n",
-					m->e1_no,m->tei));
+			LOG_W("%d E1:TEI=%d Couldn't transmit I-frame at this time due to window shut",
+					m->e1_no,m->tei);
 			return;
 		}
 
@@ -221,20 +225,11 @@ static void q921_mdl_send(mtp2_t *m, enum q921_tei_identity message, int ri, int
 	f->data[3] = message;
 	f->data[4] = (ai << 1) | 1;
 
-	CARD_DEBUGF(MTP_DEBUG, (
-		"%d Sending MDL message: %d(%s), TEI=%d\r\n",
-		m->e1_no, message, q921_tei_mgmt2str(message), ai));
+	LOG_D("%d Sending MDL message: %d(%s), TEI=%d",
+		m->e1_no, message, q921_tei_mgmt2str(message), ai);
 
 	q921_transmit(m, (q921_h *)f, 8);
 }
-
-#if 0
-ctrl->timers[PRI_TIMER_T200] = 1000;		/* Time between SABME's */
-	ctrl->timers[PRI_TIMER_T201] = ctrl->timers[PRI_TIMER_T200];/* Time between TEI Identity Checks (Default same as T200) */
-	ctrl->timers[PRI_TIMER_T202] = 2 * 1000;	/* Min time between transmission of TEI Identity request messages */
-	ctrl->timers[PRI_TIMER_T203] = 10 * 1000;	/* Max time without exchanging packets */
-
-#endif
 
 static void t202_expire(void *data)
 {
@@ -242,15 +237,15 @@ static void t202_expire(void *data)
 	mtp2_t *m = (mtp2_t *)data;
 
 	/* Start the TEI request timer. */
-    sys_timeout(2000, t202_expire, m);
+    sched_timeout(2000, t202_expire, m);
 
 	++m->n202_counter;
 
 	/* Max numer of transmissions of the TEI identity request message  = 3 */
 	if (m->n202_counter > 3) {
-		sys_untimeout(t202_expire, m);
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1 Unable to receive TEI from network in state %d(%s)!\r\n",
-			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
+		sched_untimeout(t202_expire, m);
+		LOG_W("%d E1 Unable to receive TEI from network in state %d(%s)!",
+			m->e1_no, m->q921_state, q921_state2str(m->q921_state));
 
 		switch (m->q921_state) {
 			case Q921_ASSIGN_AWAITING_TEI:
@@ -306,7 +301,7 @@ static void q921_send_dm(mtp2_t *m, int fbit) /* DM表示Layer2 处于拆线状�
 		h.h.c_r = 1;
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("Don't know how to DM on a type %d node\r\n", m->pri_mode));
+		LOG_W("Don't know how to DM on a type %d node", m->pri_mode);
 		return;
 	}
 
@@ -330,11 +325,11 @@ static void q921_send_disc(mtp2_t *m, int pbit) /*结束多帧操作时发送DIS
 		h.h.c_r = 1;
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("Don't know how to DISC on a type %d node\r\n", m->pri_mode));
+		LOG_W("Don't know how to DISC on a type %d node", m->pri_mode);
 		return;
 	}
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1 TEI=%d Sending DISC\r\n", m->e1_no,m->tei));
+	LOG_W("%d E1 TEI=%d Sending DISC", m->e1_no,m->tei);
 
 	q921_transmit(m, &h, 3);
 }
@@ -356,11 +351,11 @@ static void q921_send_ua(mtp2_t *m, int fbit)
 		h.h.c_r = 1;
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("Don't know how to DISC on a type %d node\r\n", m->pri_mode));
+		LOG_W("Don't know how to DISC on a type %d node", m->pri_mode);
 		return;
 	}
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1 TEI=%d Sending UA\r\n", m->e1_no, m->tei));
+	LOG_D("%d E1 TEI=%d Sending UA", m->e1_no, m->tei);
 
 	q921_transmit(m, &h, 3);
 }
@@ -383,48 +378,13 @@ static void q921_send_sabme(mtp2_t *m)
 		h.h.c_r = 0;
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("Don't know how to DISC on a type %d node\r\n", m->pri_mode));
+		LOG_W("Don't know how to DISC on a type %d node", m->pri_mode);
 		return;
 	}
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1 TEI=%d Sending SABME\r\n", m->e1_no, m->tei));
+	LOG_I("%d E1 TEI=%d Sending SABME", m->e1_no, m->tei);
 
 	q921_transmit(m, &h, 3);
-}
-
-static int q921_ack_packet(mtp2_t *m, int num)
-{
-#if 0
-	struct q921_frame *f;
-	struct q921_frame *prev;
-
-	for (prev = NULL, f = link->tx_queue; f; prev = f, f = f->next) {
-		if (f->status != Q921_TX_FRAME_SENT) {
-			break;
-		}
-		if (f->h.n_s == num) {
-			/* Cancel each packet as necessary */
-			/* That's our packet */
-			if (prev)
-				prev->next = f->next;
-			else
-				link->tx_queue = f->next;
-
-			vLog(MONITOR_NOTICE,
-				"-- ACKing N(S)=%d, tx_queue head is N(S)=%d (-1 is empty, -2 is not transmitted)\n",
-				f->h.n_s,
-				link->tx_queue
-					? link->tx_queue->status == Q921_TX_FRAME_SENT
-						? link->tx_queue->h.n_s
-						: -2
-					: -1);
-			/* Update v_a */
-			vPortFree(f);
-			return 1;
-		}
-	}
-#endif
-	return 1;
 }
 
 static void t203_expire(void *data);
@@ -434,36 +394,36 @@ static void t200_expire(void *data);
 
 static void reschedule_t200(mtp2_t *m)
 {
-	CARD_DEBUGF(MTP_DEBUG, ("-- Restarting T200 timer\r\n"));
+	//LOG_D("-- Restarting T200 timer");
 
-    sys_untimeout(t200_expire, m);
-    sys_timeout(1000, t200_expire, m);
+    sched_untimeout(t200_expire, m);
+    sched_timeout(1000, t200_expire, m);
 }
 
 static void start_t203(mtp2_t *m)
 {
-	CARD_DEBUGF(MTP_DEBUG, ("-- Starting T203 timer\r\n"));
-    sys_untimeout(t203_expire, m);
-    sys_timeout(10000, t203_expire, m);
+	//LOG_D("-- Starting T203 timer, '%d' E1 state = %s", m->e1_no, q921_state2str(m->q921_state));
+    sched_untimeout(t203_expire, m);
+    sched_timeout(10000, t203_expire, m);
 }
 
 static void stop_t203(mtp2_t *m)
 {
-    CARD_DEBUGF(MTP_DEBUG, ("-- Stopping T203 timer\r\n"));
-    sys_untimeout(t203_expire, m);
+    //LOG_D("-- Stopping T203 timer, '%d' E1 state = %s", m->e1_no, q921_state2str(m->q921_state));
+    sched_untimeout(t203_expire, m);
 }
 
 static void start_t200(mtp2_t *m)
 {
-	CARD_DEBUGF(MTP_DEBUG, ("-- Starting T200 timer\r\n"));
-	sys_untimeout(t200_expire, m);
-    sys_timeout(1000, t200_expire, m);
+	//LOG_D("-- Starting T200 timer");
+	sched_untimeout(t200_expire, m);
+    sched_timeout(1000, t200_expire, m);
 }
 
 static void stop_t200(mtp2_t *m)
 {
-    CARD_DEBUGF(MTP_DEBUG, ("-- Stopping T200 timer\r\n"));
-    sys_untimeout(t200_expire, m);
+    //LOG_D("-- Stopping T200 timer");
+    sched_untimeout(t200_expire, m);
 }
 
 /*!
@@ -514,17 +474,17 @@ static void restart_timer_expire(void *data)
 
 static void restart_timer_stop(mtp2_t *m)
 {
-    sys_untimeout(restart_timer_expire, m);
+    sched_untimeout(restart_timer_expire, m);
 }
 
 /*! \note Only call on the transition to state Q921_TEI_ASSIGNED or already there. */
 static void restart_timer_start(mtp2_t *m)
 {
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1 SAPI/TEI=%d/%d Starting link restart delay timer\r\n",
-			m->e1_no, m->sapi, m->tei));
+	LOG_D("%d E1 SAPI/TEI=%d/%d Starting link restart delay timer",
+			m->e1_no, m->sapi, m->tei);
 
-	sys_untimeout(restart_timer_expire, m);
-    sys_timeout(1000, restart_timer_expire, m);
+	sched_untimeout(restart_timer_expire, m);
+    sched_timeout(1000, restart_timer_expire, m);
 }
 
 /*! \note Only call on the transition to state Q921_TEI_ASSIGNED or already there. */
@@ -540,8 +500,13 @@ static int q921_check_delay_restart(mtp2_t *m)
 		 * For PTMP links:
 		 * We can optionally keep L2 automatically alive and happy.
 		 */
-		restart_timer_start(m);
 
+		u8_t l1_status = (ram_params.e1_l1_alarm >> m->e1_no) & 1;
+    
+		if (l1_status == 0) {
+			restart_timer_start(m);
+		}
+		
 		switch (m->q921_state) {
 		case Q921_MULTI_FRAME_ESTABLISHED:
 		case Q921_TIMER_RECOVERY:
@@ -575,73 +540,48 @@ static void q921_clear_exception_conditions(mtp2_t *m)
 
 static void q921_dump_pri(mtp2_t *m, char direction_tag);
 
+
 void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 {
 	int x;
 	const char *type;
 	char direction_tag;
+	u8_t ft = h->raw[2];
 
 	direction_tag = txrx ? '>' : '<';
 
-	CARD_DEBUGF(MTP_DEBUG, ("\r\n"));
 	if (debugflags) {
 		q921_dump_pri(m, direction_tag);
 	}
 
-#if 0
 	if (debugflags) {
-		char buf[500] = {0};
-		int buflen = 0;
-
-		for (x=0;x<len;x++)
-			buflen += sprintf(buf + buflen, "%02x ", h->raw[x]);
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c [ %s]\r\n", m->e1_no, direction_tag, buf);
-
-	}
-#endif
-
-	if (debugflags) {
-		switch (h->h.data[0] & Q921_FRAMETYPE_MASK) {
+		switch (ft & Q921_FRAMETYPE_MASK) {
 		case 0:
 		case 2:
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c Informational frame:\r\n", m->e1_no, direction_tag));
+			LOG_D("%d E1: %c Informational frame:", m->e1_no, direction_tag);
 			break;
 		case 1:
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c Supervisory frame:\r\n", m->e1_no, direction_tag));
+			LOG_D("%d E1: %c Supervisory frame:", m->e1_no, direction_tag);
 			break;
 		case 3:
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c Unnumbered frame:\r\n", m->e1_no, direction_tag));
+			LOG_D("%d E1: %c Unnumbered frame:", m->e1_no, direction_tag);
 			break;
 		}
-#if 0
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c SAPI: %02d  C/R: %d TEI: %d\r\n",
-			m->e1_no,
-			direction_tag,
-			h->h.sapi,
-			h->h.c_r,
-			h->h.tei);
-#endif
 
-		switch (h->h.data[0] & Q921_FRAMETYPE_MASK) {
+		switch (ft & Q921_FRAMETYPE_MASK) {
 		case 0:
 		case 2:
 			/* Informational frame */
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c N(S): %03d   0: %d\r\n",
+			LOG_D("%d E1: %c N(S): %03d   0: %d",
 				m->e1_no,
 				direction_tag,
 				h->i.n_s,
-				h->i.ft));
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c N(R): %03d   P: %d\r\n",
+				h->i.ft);
+			LOG_D("%d E1: %c N(R): %03d   P: %d",
 				m->e1_no,
 				direction_tag,
 				h->i.n_r,
-				h->i.p_f));
-#if 0
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c %d bytes of data\r\n",
-				m->e1_no,
-				direction_tag,
-				len - 2);
-#endif
+				h->i.p_f);
 			break;
 		case 1:
 			/* Supervisory frame */
@@ -657,23 +597,12 @@ void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 				type = "REJ";
 				break;
 			}
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c N(R): %03d    P/F: %d [ %s ]\r\n",
+			LOG_D("%d E1: %c N(R): %03d    P/F: %d [ %s ]",
 				m->e1_no,
 				direction_tag,
 				h->s.n_r,
 				h->s.p_f,
-				type));
-#if 0
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c N(R): %03d P/F: %d\r\n",
-				m->e1_no,
-				direction_tag,
-				h->s.n_r,
-				h->s.p_f);
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c %d bytes of data\r\n",
-				m->e1_no,
-				direction_tag,
-				len - 2);
-#endif
+				type);
 			break;
 		case 3:
 			/* Unnumbered frame */
@@ -708,17 +637,11 @@ void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 					break;
 				}
 			}
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c P/F: %d [ %s ]\r\n",
+			LOG_D("%d E1: %c P/F: %d [ %s ]",
 				m->e1_no,
 				direction_tag,
 				h->u.p_f,
-				type));
-#if 0
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c %d bytes of data\r\n",
-				m->e1_no,
-				direction_tag,
-				len - 1);
-#endif
+				type);
 			break;
 		}
 
@@ -728,13 +651,13 @@ void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 
 			/* TEI management related */
 			type = q921_tei_mgmt2str((enum q921_tei_identity)h->u.data[3]);
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c MDL Message: %d(%s)\r\n", m->e1_no,direction_tag, h->u.data[3], type));
+			LOG_D("%d E1: %c MDL Message: %d(%s)", m->e1_no,direction_tag, h->u.data[3], type);
 			ri = (h->u.data[1] << 8) | h->u.data[2];
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c Ri: %d\r\n", m->e1_no,direction_tag, ri));
+			LOG_D("%d E1: %c Ri: %d", m->e1_no,direction_tag, ri);
 			action = &h->u.data[4];
 			for (x = len - (action - (u8_t *) h); 0 < x; --x, ++action) {
-				CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c Ai: %d E:%d\r\n",
-					m->e1_no,direction_tag, (*action >> 1) & 0x7f, *action & 0x01));
+				LOG_D("%d E1: %c Ai: %d E:%d",
+					m->e1_no,direction_tag, (*action >> 1) & 0x7f, *action & 0x01);
 			}
 		}
 	}
@@ -743,23 +666,21 @@ void q921_dump(mtp2_t *m, q921_h *h, int len, int debugflags, int txrx)
 static void q921_dump_pri(mtp2_t *m, char direction_tag)
 {
 
-//	CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c TEI: %d State %d(%s)\r\n",
-//		m->e1_no, direction_tag, m->tei, m->q921_state, q921_state2str(m->q921_state));
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c V(A)=%d, V(S)=%d, V(R)=%d\r\n",
-		m->e1_no, direction_tag, m->v_a, m->v_s, m->v_r));
+	LOG_D("%d E1: %c V(A)=%d, V(S)=%d, V(R)=%d",
+		m->e1_no, direction_tag, m->v_a, m->v_s, m->v_r);
 #if 0
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c K=%d, RC=%d, l3_initiated=%d, reject_except=%d, ack_pend=%d\r\n",
+	CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c K=%d, RC=%d, l3_initiated=%d, reject_except=%d, ack_pend=%d",
 		m->e1_no, direction_tag, 7, m->RC, m->l3_initiated,
 		m->reject_exception, m->acknowledge_pending);
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c T200_id=%d, N200=%d, T203_id=%d\r\n",
+	CARD_DEBUGF(MTP_DEBUG, ("%d E1: %c T200_id=%d, N200=%d, T203_id=%d",
 		m->e1_no, direction_tag, m->t200_timer, 3, m->t203_timer);
 #endif
 }
 
 static void q921_mdl_ignore(mtp2_t *m, q921_u *h, const char *reason)
 {
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: Ignoring MDL message: %d(%s)  %s\n",
-		m->e1_no, h->data[3], q921_tei_mgmt2str((enum q921_tei_identity)h->data[3]), reason));
+	LOG_I("%d E1: Ignoring MDL message: %d(%s)  %s",
+		m->e1_no, h->data[3], q921_tei_mgmt2str((enum q921_tei_identity)h->data[3]), reason);
 }
 
 static int q921_mdl_receive(mtp2_t *m, q921_u *h, int len)
@@ -768,34 +689,34 @@ static int q921_mdl_receive(mtp2_t *m, q921_u *h, int len)
 	int tei;
 
 	if (len <= &h->data[0] - (u8_t *) h) {
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Received short MDL frame\r\n", m->e1_no));
+		LOG_W("%d E1: Received short MDL frame", m->e1_no);
 		return -1;
 	}
 	if (h->data[0] != 0x0f) {
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Received MDL with unsupported management entity %02x\r\n",
-			m->e1_no,h->data[0]));
+		LOG_W("%d E1: Received MDL with unsupported management entity %02x",
+			m->e1_no,h->data[0]);
 		return -1;
 	}
 	if (len <= &h->data[4] - (u8_t *) h) {
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Received short MDL message\r\n",m->e1_no));
+		LOG_W("%d E1: Received short MDL message",m->e1_no);
 		return -1;
 	}
 	if (h->data[3] != Q921_TEI_IDENTITY_CHECK_RESPONSE
 		&& !(h->data[4] & 0x01)) {
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Received MDL message: %d(%s) with Ai E bit not set.\r\n",
-			m->e1_no,h->data[3], q921_tei_mgmt2str((enum q921_tei_identity)h->data[3])));
+		LOG_W("%d E1: Received MDL message: %d(%s) with Ai E bit not set.",
+			m->e1_no,h->data[3], q921_tei_mgmt2str((enum q921_tei_identity)h->data[3]));
 		return -1;
 	}
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: Received MDL message: %d(%s)\n",
-		m->e1_no, h->data[3], q921_tei_mgmt2str((enum q921_tei_identity)h->data[3])));
+	LOG_I("%d E1: Received MDL message: %d(%s)",
+		m->e1_no, h->data[3], q921_tei_mgmt2str((enum q921_tei_identity)h->data[3]));
 
 	if (m->pri_mode == PRI_NETWORK) {
 		/*
 		 * We are not managing automatic TEI's in this mode so we can
 		 * ignore MDL messages from the CPE.
 		 */
-		q921_mdl_ignore(m, h, "We are in NT-PTP mode.\r\n");
+		q921_mdl_ignore(m, h, "We are in NT-PTP mode.");
 		return -1;
 	}
 
@@ -806,18 +727,18 @@ static int q921_mdl_receive(mtp2_t *m, q921_u *h, int len)
 	case Q921_TEI_IDENTITY_REQUEST:
 	case Q921_TEI_IDENTITY_CHECK_RESPONSE:
 	case Q921_TEI_IDENTITY_VERIFY:
-		q921_mdl_ignore(m, h, "We are not in NT-PTMP mode.\r\n");
+		q921_mdl_ignore(m, h, "We are not in NT-PTMP mode.");
 		return -1;
 	case Q921_TEI_IDENTITY_ASSIGNED:
 		if (m->pri_mode == PRI_NETWORK) {
 			/* We should not be receiving this message. */
-			q921_mdl_ignore(m, h, "We are the network.\r\n");
+			q921_mdl_ignore(m, h, "We are the network.");
 		}
 		return -1;
 	case Q921_TEI_IDENTITY_CHECK_REQUEST:
 		if (m->pri_mode == PRI_NETWORK) {
 			/* We should not be receiving this message. */
-			q921_mdl_ignore(m, h, "We are the network.\r\n");
+			q921_mdl_ignore(m, h, "We are the network.");
 			return -1;
 		}
 
@@ -829,7 +750,7 @@ static int q921_mdl_receive(mtp2_t *m, q921_u *h, int len)
 	case Q921_TEI_IDENTITY_REMOVE:
 		if (m->pri_mode == PRI_NETWORK) {
 			/* We should not be receiving this message. */
-			q921_mdl_ignore(m, h, "We are the network.\r\n");
+			q921_mdl_ignore(m, h, "We are the network.");
 
 		}
 		return -1;
@@ -876,13 +797,11 @@ int q921_transmit_iframe(u8_t e1_no, void *buf, int len /*, int cr*/)
 			break;
 		}
 #endif
-		/* Put new frame on queue tail. */
-		//f->len = len + 4;
-		//memcpy(i->h.data, buf, len);
 
 		index = (m->retrans_last_sent + 1) % 128;
 		if(index == m->retrans_last_acked) {
-			CARD_DEBUGF(MTP_DEBUG, ("Q921 retransmit buffer full, we will lost on link '%d'.\r\n", m->e1_no));
+			LOG_W("Q921 retransmit buffer full, we will lost on link '%d'(%s).last_sent=%d, last_acked=%d", 
+			m->e1_no, q921_state2str(m->q921_state), m->retrans_last_sent, m->retrans_last_acked);			
 			break;
 		}
 
@@ -893,8 +812,7 @@ int q921_transmit_iframe(u8_t e1_no, void *buf, int len /*, int cr*/)
 		m->retrans_last_sent = index;
 
 		if (m->retrans_seq == -1){
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: queued I-frame , retrans_last_sent=%d\r\n",
-					m->e1_no, m->retrans_last_sent));
+			//LOG_W("%d E1: queued I-frame , retrans_last_sent=%d",m->e1_no, m->retrans_last_sent);
 			m->retrans_seq = m->retrans_last_sent;
 		}
 		break;
@@ -902,8 +820,8 @@ int q921_transmit_iframe(u8_t e1_no, void *buf, int len /*, int cr*/)
 	case Q921_ASSIGN_AWAITING_TEI:
 	case Q921_AWAITING_RELEASE:
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("Cannot transmit frames in state %d(%s)\n",
-			m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1 Cannot transmit frames in state %d(%s)", m->e1_no,
+			m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 	return 0;
@@ -917,7 +835,7 @@ int q921_transmit_uiframe(u8_t e1_no, void *buf, int len)
 	mtp2_t *m = get_mtp2_state(e1_no);
 
 	if (len >= 512) {
-		CARD_DEBUGF(MTP_DEBUG, ("Requested to send UI-frame larger than 512 bytes!\n"));
+		LOG_W("Requested to send UI-frame larger than 512 bytes!");
 		return -1;
 	}
 
@@ -939,7 +857,7 @@ int q921_transmit_uiframe(u8_t e1_no, void *buf, int len)
 		h->h.c_r = 0;
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("Don't know how to UI-frame on a type %d node\n", m->pri_mode));
+		LOG_W("Don't know how to UI-frame on a type %d node", m->pri_mode);
 		return -1;
 	}
 
@@ -968,10 +886,10 @@ static void q921_reject(mtp2_t *m, int pf)
 		h.h.c_r = 1;
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("Don't know how to REJ on a type %d node\n", m->pri_mode));
+		LOG_W("Don't know how to REJ on a type %d node", m->pri_mode);
 		return;
 	}
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d Sending REJ N(R)=%d\n", m->e1_no,m->tei, m->v_r));
+	LOG_W("%d E1 Sending REJ N(R)=%d", m->e1_no, m->v_r);
 
 	q921_transmit(m, &h, 4);
 }
@@ -1000,16 +918,46 @@ static void q921_rr(mtp2_t *m, int pbit, int cmd)
 			h.h.c_r = 1;
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("Don't know how to RR on a type %d node\r\n", m->pri_mode));
+		LOG_W("Don't know how to RR on a type %d node", m->pri_mode);
 		return;
 	}
-#if 0	/* Don't flood debug trace with RR if not really looking at Q.921 layer. */
-	if (ctrl->debug & PRI_DEBUG_Q921_STATE) {
-		pri_message(ctrl, "TEI=%d Sending RR N(R)=%d\n", link->tei, link->v_r);
-	}
-#endif
+	//LOG_I("%d E1 --Sending RR N(R)=%d, v_s=%d, v_a=%d", m->e1_no, m->v_r, m->v_s, m->v_a);
 	q921_transmit(m, &h, 4);
 }
+
+#if 0
+static void q921_rnr(mtp2_t *m, int pbit, int cmd)
+{
+	q921_h h;
+
+	Q921_CLEAR_INIT(&h, m->sapi, m->tei);
+	h.s.x0 = 0;	/* Always 0 */
+	h.s.ss = 1; /* Receive NOT Ready */
+	h.s.ft = 1;	/* Frametype (01) */
+	h.s.n_r = m->v_r;	/* N(R) */
+	h.s.p_f = pbit;		/* Poll/Final set appropriately */
+	switch (m->pri_mode) {
+	case PRI_NETWORK:
+		if (cmd)
+			h.h.c_r = 1;
+		else
+			h.h.c_r = 0;
+		break;
+	case PRI_CPE:
+		if (cmd)
+			h.h.c_r = 0;
+		else
+			h.h.c_r = 1;
+		break;
+	default:
+		LOG_W("Don't know how to RR on a type %d node", m->pri_mode);
+		return;
+	}
+
+	LOG_W("E1 '%d' Sending RNR N(R)=%d", m->e1_no, m->v_r);
+	q921_transmit(m, &h, 4);
+}
+#endif
 
 static void transmit_enquiry(mtp2_t *m)
 {
@@ -1020,48 +968,11 @@ static void transmit_enquiry(mtp2_t *m)
 	}
 }
 
-static void q921_mdl_handle_ptp_error(mtp2_t *m, char error)
-{
-	switch (error) {
-	case 'J':
-		/*
-		 * This is for the transition to Q921_AWAITING_ESTABLISHMENT.
-		 * The event is genereated here rather than where the MDL_ERROR
-		 * 'J' is posted because of the potential event conflict with
-		 * incoming I-frame information passed to Q.931.
-		 */
-		/*
-		ctrl->schedev = 1;
-		ctrl->ev.gen.e = PRI_EVENT_DCHAN_DOWN;
-		*/
-		break;
-	case 'A':
-	case 'B':
-	case 'C':
-	case 'D':
-	case 'E':
-	case 'F':
-	case 'G':
-	case 'H':
-	case 'I':
-	case 'K':
-		break;
-	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: PTP MDL can't handle error of type %c\r\n",m->e1_no, error));
-		break;
-	}
-}
-
-static void q921_mdl_handle_error(mtp2_t *m, char error)
-{
-	q921_mdl_handle_ptp_error(m, error);
-}
-
 static void q921_mdl_handle_error_callback(void *data)
 {
 	mtp2_t *m = (mtp2_t *)data;
 
-	q921_mdl_handle_error(m, m->mdl_error);
+	//q921_mdl_handle_error(m, m->mdl_error);
 
 	m->mdl_error = 0;
 
@@ -1073,21 +984,21 @@ static void q921_mdl_error(mtp2_t *m, char error)
 
 	switch (error) {
 	case 'A':
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1:"
-				"TEI=%d MDL-ERROR (A): Got supervisory frame with F=1 in state %d(%s)\r\n",
-			m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1:"
+				"TEI=%d MDL-ERROR (A): Got supervisory frame with F=1 in state %d(%s)",
+			m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	case 'B':
 	case 'E':
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d MDL-ERROR (%c): DM (F=%c) in state %d(%s)\r\n",
+		LOG_W("%d E1:TEI=%d MDL-ERROR (%c): DM (F=%c) in state %d(%s)",
 			m->e1_no,m->tei, error, (error == 'B') ? '1' : '0',
-			m->q921_state, q921_state2str(m->q921_state)));
+			m->q921_state, q921_state2str(m->q921_state));
 		break;
 	case 'C':
 	case 'D':
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: TEI=%d MDL-ERROR (%c): UA (F=%c) in state %d(%s)\r\n",
+		LOG_W("%d E1: TEI=%d MDL-ERROR (%c): UA (F=%c) in state %d(%s)",
 				m->e1_no,m->tei, error, (error == 'C') ? '1' : '0',
-				m->q921_state, q921_state2str(m->q921_state)));
+				m->q921_state, q921_state2str(m->q921_state));
 
 		break;
 	case 'F':
@@ -1105,63 +1016,63 @@ static void q921_mdl_error(mtp2_t *m, char error)
 			 * This message is rather annoying and is normal for
 			 * reasons 1-3 above.
 			 */
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d MDL-ERROR (F): SABME in state %d(%s)\r\n",
-				m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state)));
+			LOG_W("%d E1:TEI=%d MDL-ERROR (F): SABME in state %d(%s)",
+				m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state));
 		}
 		break;
 	case 'G':
 		/* We could not get a response from the peer. */
 		if (is_debug_q921_state) {
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d MDL-ERROR (G): T200 expired N200 times sending SABME in state %d(%s)\r\n",
-				m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state)));
+			LOG_W("%d E1:TEI=%d MDL-ERROR (G): T200 expired N200 times sending SABME in state %d(%s)",
+				m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state));
 		}
 		break;
 	case 'H':
 		/* We could not get a response from the peer. */
 		if (is_debug_q921_state) {
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d MDL-ERROR (H): T200 expired N200 times sending DISC in state %d(%s)\r\n",
-					m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state)));
+			LOG_W("%d E1:TEI=%d MDL-ERROR (H): T200 expired N200 times sending DISC in state %d(%s)",
+					m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state));
 		}
 		break;
 	case 'I':
 		/* We could not get a response from the peer. */
 		if (is_debug_q921_state) {
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d MDL-ERROR (I): T200 expired N200 times sending RR/RNR in state %d(%s)\r\n",
-					m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state)));
+			LOG_W("%d E1:TEI=%d MDL-ERROR (I): T200 expired N200 times sending RR/RNR in state %d(%s)",
+					m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state));
 		}
 		break;
 	case 'J':
 		/* N(R) not within ack window. */
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d MDL-ERROR (J): N(R) error in state %d(%s)\r\n",
-				m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1:TEI=%d MDL-ERROR (J): N(R) error in state %d(%s)",
+				m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	case 'K':
 		/*
 		 * Received a frame reject frame.
 		 * The other end does not like what we are doing at all for some reason.
 		 */
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d MDL-ERROR (K): FRMR in state %d(%s)\r\n",
-				m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1:TEI=%d MDL-ERROR (K): FRMR in state %d(%s)",
+				m->e1_no,m->tei, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d MDL-ERROR (%c): in state %d(%s)\r\n",
-				m->e1_no,m->tei, error, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1:TEI=%d MDL-ERROR (%c): in state %d(%s)",
+				m->e1_no,m->tei, error, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
 	if (m->mdl_error) {
 		/* This should not happen. */
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1:Trying to queue MDL-ERROR (%c) when MDL-ERROR (%c) is already scheduled\r\n",
-			m->e1_no,error, m->mdl_error));
+		LOG_W("%d E1:Trying to queue MDL-ERROR (%c) when MDL-ERROR (%c) is already scheduled",
+			m->e1_no,error, m->mdl_error);
 		return;
 	}
 	m->mdl_error = error;
-	//m->mdl_timer = sched_add(q921_sched, 1, q921_mdl_handle_error_callback, m);
-	sys_timeout(2, q921_mdl_handle_error_callback, m);
+	sched_timeout(2, q921_mdl_handle_error_callback, m);
 }
 
 static void t200_expire(void *data)
 {
+	//u8_t l1_status;
 	mtp2_t *m = (mtp2_t *)data;
 
 	m->t200_timer = 0;
@@ -1172,27 +1083,20 @@ static void t200_expire(void *data)
 		transmit_enquiry(m);
 		m->RC++;
 		q921_setstate(m, Q921_TIMER_RECOVERY);
+		LOG_W("%d E1: T200 expired, MULTI_FRAME_ESTABLISED-->TIMER_RECOVERY");
 		break;
 	case Q921_TIMER_RECOVERY:
 		/* SDL Flow Figure B.8/Q.921 Page 81 */
 		if (m->RC != 3) { //3次超时
-#if 0
-			if (m->v_s == m->v_a) {
-				transmit_enquiry(m);
-			}
-#else
 			/* We are chosing to enquiry by default (to reduce risk of T200 timer errors at the other
 			 * side, instead of retransmission of the last I-frame we sent */
 			transmit_enquiry(m);
-#endif
 			m->RC++;
 		} else {
 			q921_mdl_error(m, 'I');
 			q921_establish_data_link(m);
 			m->l3_initiated = 0;
 			q921_setstate(m, Q921_AWAITING_ESTABLISHMENT);
-			//告诉第3层链路中断
-			//ToDo...
 		}
 		break;
 	case Q921_AWAITING_ESTABLISHMENT:
@@ -1205,8 +1109,6 @@ static void t200_expire(void *data)
 			q921_discard_iqueue(m);
 			//q921_mdl_error(m, 'G');
 			q921_setstate(m, Q921_TEI_ASSIGNED);
-			/* DL-RELEASE indication */
-			//q931_dl_event(m, Q931_DL_EVENT_DL_RELEASE_IND);
 		}
 		break;
 	case Q921_AWAITING_RELEASE:
@@ -1217,15 +1119,13 @@ static void t200_expire(void *data)
 		} else {
 			q921_check_delay_restart(m);
 			q921_mdl_error(m, 'H');
-			/* DL-RELEASE confirm */
-			//q931_dl_event(m, Q931_DL_EVENT_DL_RELEASE_CONFIRM);
 			q921_setstate(m, Q921_TEI_ASSIGNED);
 		}
 		break;
 	default:
 		/* Looks like someone forgot to stop the T200 timer. */
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: T200 expired in state %d(%s)\r\n",
-			m->e1_no,m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: T200 expired in state %d(%s)",
+			m->e1_no,m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 }
@@ -1242,8 +1142,8 @@ static void t203_expire(void *data)
 		break;
 	default:
 		/* Looks like someone forgot to stop the T203 timer. */
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: T203 expired in state %d(%s)\r\n",
-			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: T203 expired in state %d(%s)",
+			m->e1_no, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 }
@@ -1252,7 +1152,7 @@ static void q921_mdl_remove(mtp2_t *m)
 {
 	int mdl_free_me;
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1:MDL-REMOVE: Removing TEI %d\r\n", m->e1_no,m->tei));
+	LOG_I("%d E1:MDL-REMOVE: Removing TEI %d", m->e1_no,m->tei);
 	mdl_free_me = 0;
 
 	switch (m->q921_state) {
@@ -1290,8 +1190,8 @@ static void q921_mdl_remove(mtp2_t *m)
 		q921_setstate(m, Q921_TEI_UNASSIGNED);
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: MDL-REMOVE when in state %d(%s)\r\n",
-			m->e1_no,m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: MDL-REMOVE when in state %d(%s)",
+			m->e1_no,m->q921_state, q921_state2str(m->q921_state));
 		return;
 	}
 
@@ -1313,11 +1213,11 @@ static void t201_expire(void *data)
 	mtp2_t *m = (mtp2_t *)m;
 
 	/* Start the TEI check timer. */
-	sys_timeout(1000, t201_expire, m);
+	sched_timeout(1000, t201_expire, m);
 
 	++m->t201_expirycnt;
 	if (Q921_TEI_CHECK_MAX_POLLS < m->t201_expirycnt) {
-		sys_untimeout(t201_expire, m);
+		sched_untimeout(t201_expire, m);
 
 		switch (m->tei_check) {
 		case Q921_TEI_CHECK_DEAD:
@@ -1368,16 +1268,6 @@ static int is_command(mtp2_t *m, q921_h *h)
 	return command;
 }
 
-/**
-static void q921_clear_exception_conditions(mtp2_t *m)
-{
-	m->own_rx_busy = 0;
-	m->peer_rx_busy = 0;
-	m->reject_exception = 0;
-	m->acknowledge_pending = 0;
-}
-**/
-
 static int q921_sabme_rx(mtp2_t *m, q921_h *h)
 {
 	enum Q931_DL_EVENT delay_q931_dl_event;
@@ -1392,27 +1282,21 @@ static int q921_sabme_rx(mtp2_t *m, q921_h *h)
 		//q921_mdl_error(m, 'F');
 		if (m->v_s != m->v_a) {
 			q921_discard_iqueue(m);
-			/* DL-ESTABLISH indication */
-			delay_q931_dl_event = Q931_DL_EVENT_DL_ESTABLISH_IND;
-		} else {
-			delay_q931_dl_event = Q931_DL_EVENT_NONE;
-		}
+		} 
 		stop_t200(m);
 		start_t203(m);
 		m->v_s = m->v_a = m->v_r = 0;
-#if 0
-		//q921_setstate(m, Q921_MULTI_FRAME_ESTABLISHED);
-		if (delay_q931_dl_event != Q931_DL_EVENT_NONE) {
-			/* Delayed because Q.931 could send STATUS messages. */
-			q931_dl_event(m, delay_q931_dl_event);
+
+		if (m->q921_state == Q921_TIMER_RECOVERY) {
+			q921_setstate(m, Q921_MULTI_FRAME_ESTABLISHED);
 		}
-#endif
 		break;
 	case Q921_TEI_ASSIGNED:
 		restart_timer_stop(m);
 		q921_send_ua(m, h->u.p_f);
 		q921_clear_exception_conditions(m);
 		m->v_s = m->v_a = m->v_r = 0;
+
 		/* DL-ESTABLISH indication */
 		delay_q931_dl_event = Q931_DL_EVENT_DL_ESTABLISH_IND;
 
@@ -1430,8 +1314,8 @@ static int q921_sabme_rx(mtp2_t *m, q921_h *h)
 		q921_send_dm(m, h->u.p_f);
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("Cannot handle SABME in state %d(%s)\n",
-			m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("Cannot handle SABME in state %d(%s)",
+			m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
@@ -1441,7 +1325,7 @@ static int q921_sabme_rx(mtp2_t *m, q921_h *h)
 static int q921_disc_rx(mtp2_t *m, q921_h *h)
 {
 	int res = 0;
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: TEI=%d Got DISC\r\n", m->e1_no,m->tei));
+	LOG_W("%d E1: TEI=%d Got DISC", m->e1_no,m->tei);
 
 	switch (m->q921_state) {
 	case Q921_TEI_ASSIGNED:
@@ -1463,69 +1347,25 @@ static int q921_disc_rx(mtp2_t *m, q921_h *h)
 		if (m->q921_state == Q921_MULTI_FRAME_ESTABLISHED)
 			stop_t203(m);
 		q921_setstate(m, Q921_TEI_ASSIGNED);
+
+		ram_params.e1_l2_alarm &= ~(1 << m->e1_no);
+        link_outof_service(m->e1_no, LKALARM_WORKING);
+
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Don't know what to do with DISC in state %d(%s)\r\n",
-			m->e1_no,m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: Don't know what to do with DISC in state %d(%s)",
+			m->e1_no,m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
 	return res;
 }
 
-#if 0
-static void q921_mdl_handle_network_error(mtp2_t *m, char error)
-{
-	switch (error) {
-	case 'C':
-	case 'D':
-	case 'G':
-	case 'H':
-		q921_mdl_remove(m);
-		break;
-	case 'A':
-	case 'B':
-	case 'E':
-	case 'F':
-	case 'I':
-	case 'J':
-	case 'K':
-		break;
-	default:
-		vLog(MONITOR_ERR, "%d E1: Network MDL can't handle error of type %c\r\n", m->e1_no,error);
-		break;
-	}
-}
-
-static void q921_mdl_handle_cpe_error(mtp2_t *m, char error)
-{
-	switch (error) {
-	case 'C':
-	case 'D':
-	case 'G':
-	case 'H':
-		q921_mdl_remove(m);
-		break;
-	case 'A':
-	case 'B':
-	case 'E':
-	case 'F':
-	case 'I':
-	case 'J':
-	case 'K':
-		break;
-	default:
-		vLog(MONITOR_ERR, "%d E1: CPE MDL can't handle error of type %c\r\n",m->e1_no, error);
-		break;
-	}
-}
-#endif
-
 static int q921_ua_rx(mtp2_t *m, q921_h *h)
 {
 	enum Q931_DL_EVENT delay_q931_dl_event;
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1:TEI=%d Got UA\r\n", m->e1_no,m->tei));
+	LOG_I("%d E1:TEI=%d Got UA", m->e1_no,m->tei);
 
 	switch (m->q921_state) {
 	case Q921_TEI_ASSIGNED:
@@ -1555,18 +1395,17 @@ static int q921_ua_rx(mtp2_t *m, q921_h *h)
 			/* DL-ESTABLISH confirm */
 			delay_q931_dl_event = Q931_DL_EVENT_DL_ESTABLISH_CONFIRM;
 		}
-		/**
-		if (PTP_MODE(ctrl)) {
-			ctrl->ev.gen.e = PRI_EVENT_DCHAN_UP;
-			res = &ctrl->ev;
-		}
-		**/
+
 		stop_t200(m);
 		start_t203(m);
 
 		m->v_r = m->v_s = m->v_a = 0;
 
 		q921_setstate(m, Q921_MULTI_FRAME_ESTABLISHED);
+		ram_params.e1_l2_alarm |= (1 << m->e1_no);
+        link_in_service(m->e1_no);
+
+		//transmit_enquiry(m);
 		if (delay_q931_dl_event != Q931_DL_EVENT_NONE) {
 			/* Delayed because Q.931 could send STATUS messages. */
 			q931_dl_event(m, delay_q931_dl_event);
@@ -1584,8 +1423,8 @@ static int q921_ua_rx(mtp2_t *m, q921_h *h)
 		}
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Don't know what to do with UA in state %d(%s)\r\n",
-			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: Don't know what to do with UA in state %d(%s)",
+			m->e1_no, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
@@ -1596,7 +1435,7 @@ static void q921_enquiry_response(mtp2_t *m)
 {
 	if (m->own_rx_busy) {
 		/* XXX : TODO later sometime */
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Implement me %s: own_rx_busy\r\n", m->e1_no, __FUNCTION__));
+		LOG_W("%d E1: Implement me %s: own_rx_busy", m->e1_no, __FUNCTION__);
 		//q921_rnr(link);
 	} else {
 		q921_rr(m, 1, 0);
@@ -1616,20 +1455,7 @@ static void n_r_error_recovery(mtp2_t *m)
 
 static void update_v_a(mtp2_t *m, int n_r)
 {
-	int idealcnt = 0, realcnt = 0;
-	int x;
-
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: -- Got ACK for N(S)=%d to (but not including) N(S)=%d\r\n",m->e1_no,m->v_a, n_r));
-	for (x = m->v_a; x != n_r; Q921_INC(x)) {
-		idealcnt++;
-		realcnt += q921_ack_packet(m, x);
-	}
-	if (idealcnt != realcnt) {
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Ideally should have ack'd %d frames, but actually ack'd %d.  This is not good.\r\n",
-				m->e1_no, idealcnt, realcnt));
-		//q921_dump_iqueue_info(m);
-	}
-
+	LOG_I("%d E1: -- Got ACK for N(S)=%d to (but not including) N(S)=%d",m->e1_no,m->v_a, n_r);
 	m->v_a = n_r;
 	m->retrans_last_acked = m->v_a;
 }
@@ -1650,32 +1476,12 @@ static int n_r_is_valid(mtp2_t *m, int n_r)
 
 static int q921_invoke_retransmission(mtp2_t *m, int n_r)
 {
-#if 0
-	struct q921_frame *f;
-	struct pri *ctrl;
-
-	ctrl = link->ctrl;
-
-	/*
-	 * All acked frames should already have been removed from the queue.
-	 * Push back all sent frames.
-	 */
-	for (f = link->tx_queue; f && f->status == Q921_TX_FRAME_SENT; f = f->next) {
-		f->status = Q921_TX_FRAME_PUSHED_BACK;
-
-		/* Sanity check: Is V(A) <= N(S) <= V(S)? */
-		if (!n_r_is_valid(link, f->h.n_s)) {
-			pri_error(ctrl,
-				"Tx Q frame with invalid N(S)=%d.  Must be (V(A)=%d) <= N(S) <= (V(S)=%d)\n",
-				f->h.n_s, link->v_a, link->v_s);
-		}
+	if (m->v_s != n_r) {
+		m->v_s = n_r;
+		m->retrans_seq = m->v_s;
+		LOG_W("%d E1: Start retrans misson, V_S=%d", m->e1_no,m->v_s);
 	}
-	link->v_s = n_r;
-	return q921_send_queued_iframes(link);
-#endif
-	m->v_s = n_r;
-	m->retrans_seq = n_r;
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: Start retrans misson, retrans_seq=%d\r\n", m->e1_no,m->retrans_seq));
+	
 	return 0;
 }
 
@@ -1706,11 +1512,7 @@ static int timer_recovery_rr_rej_rx(mtp2_t *m, q921_h *h)
 				update_v_a(m, h->s.n_r);
 				stop_t200(m);
 				start_t203(m);
-				if(m->v_a == 0 && m->v_r == 0 && m->v_s == 0){
-					;
-				}else{
-					q921_invoke_retransmission(m, h->s.n_r);
-				}
+				q921_invoke_retransmission(m, h->s.n_r);
 				q921_setstate(m, Q921_MULTI_FRAME_ESTABLISHED);
 			} else {
 				goto n_r_error_out;
@@ -1721,17 +1523,14 @@ static int timer_recovery_rr_rej_rx(mtp2_t *m, q921_h *h)
 n_r_error_out:
 	n_r_error_recovery(m);
 	q921_setstate(m, Q921_AWAITING_ESTABLISHMENT);
+	ram_params.e1_l2_alarm &= ~(1 << m->e1_no);
+    link_outof_service(m->e1_no, LKALARM_RCONGEST);
 	return -1;
 }
 
 static int q921_rr_rx(mtp2_t *m, q921_h *h)
 {
 	int res = 0;
-#if 0	/* Don't flood debug trace with RR if not really looking at Q.921 layer. */
-	if (ctrl->debug & PRI_DEBUG_Q921_STATE) {
-		pri_message(ctrl, "TEI=%d Got RR N(R)=%d\n", link->tei, h->s.n_r);
-	}
-#endif
 
 	switch (m->q921_state) {
 	case Q921_TIMER_RECOVERY:
@@ -1740,7 +1539,7 @@ static int q921_rr_rx(mtp2_t *m, q921_h *h)
 	case Q921_MULTI_FRAME_ESTABLISHED:
 		/* Figure B.7/Q.921 Page 74 */
 		m->peer_rx_busy = 0;
-
+		
 		if (is_command(m, h)) {
 			if (h->s.p_f) {
 				/* Enquiry response */
@@ -1765,6 +1564,7 @@ static int q921_rr_rx(mtp2_t *m, q921_h *h)
 					/* Need to check the validity of n_r as well.. */
 					update_v_a(m, h->s.n_r);
 					restart_t200(m);
+					//LOG_W("%d E1 nr = %d, v_a=%d", m->e1_no, h->s.n_r, m->v_a);
 				}
 			}
 		}
@@ -1778,8 +1578,8 @@ static int q921_rr_rx(mtp2_t *m, q921_h *h)
 		 */
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Don't know what to do with RR in state %d(%s)\r\n",
-			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: Don't know what to do with RR in state %d(%s)",
+			m->e1_no, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
@@ -1790,7 +1590,7 @@ static int q921_rej_rx(mtp2_t *m, q921_h *h)
 {
 	int res = 0;
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: TEI=%d Got REJ N(R)=%d\r\n", m->e1_no, m->tei, h->s.n_r));
+	LOG_W("%d E1: TEI=%d Got REJ N(R)=%d", m->e1_no, m->tei, h->s.n_r);
 
 	switch (m->q921_state) {
 	case Q921_TIMER_RECOVERY:
@@ -1814,6 +1614,8 @@ static int q921_rej_rx(mtp2_t *m, q921_h *h)
 		if (!n_r_is_valid(m, h->s.n_r)) {
 			n_r_error_recovery(m);
 			q921_setstate(m, Q921_AWAITING_ESTABLISHMENT);
+			ram_params.e1_l2_alarm &= ~(1 << m->e1_no);
+        	link_outof_service(m->e1_no, LKALARM_EXECERROR);
 		} else {
 			update_v_a(m, h->s.n_r);
 			stop_t200(m);
@@ -1830,8 +1632,8 @@ static int q921_rej_rx(mtp2_t *m, q921_h *h)
 		 */
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Don't know what to do with REJ in state %d(%s)\r\n",
-			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: Don't know what to do with REJ in state %d(%s)",
+			m->e1_no, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
@@ -1842,7 +1644,7 @@ static int q921_frmr_rx(mtp2_t *m, q921_h *h)
 {
 	int res = 0;
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: TEI=%d Got FRMR\n", m->e1_no, m->tei));
+	LOG_I("%d E1: TEI=%d Got FRMR", m->e1_no, m->tei);
 
 	switch (m->q921_state) {
 	case Q921_TIMER_RECOVERY:
@@ -1865,11 +1667,11 @@ static int q921_frmr_rx(mtp2_t *m, q921_h *h)
 		 * Ignore this frame.
 		 * We likely got reset and the other end has not realized it yet.
 		 */
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: TEI=%d Ignoring FRMR.\r\n", m->e1_no, m->tei));
+		LOG_W("%d E1: TEI=%d Ignoring FRMR.", m->e1_no, m->tei);
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Don't know what to do with FRMR in state %d(%s)\r\n",
-			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: Don't know what to do with FRMR in state %d(%s)",
+			m->e1_no, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
@@ -1880,6 +1682,7 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 {
 	//int res = 0;
 	int delay_q931_receive;
+	u8_t tmp_flag = 0;
 
 	switch (m->q921_state) {
 	case Q921_TIMER_RECOVERY:
@@ -1890,9 +1693,9 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 			/* DEVIATION: Handle own rx busy */
 		} else if (h->i.n_s == m->v_r) {
 			Q921_INC(m->v_r);
-
+			m->bad_n_s_count = 0;	
 			m->reject_exception = 0;
-
+			tmp_flag = 1;
 			/*
 			 * Dump Q.931 message where Q.921 says to queue it to Q.931 so if
 			 * Q.921 is dumping its frames they will be in the correct order.
@@ -1914,8 +1717,10 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 				}
 			} else {
 				m->reject_exception = 1;
+				tmp_flag = 1;
 				q921_reject(m, h->i.p_f);
-				m->acknowledge_pending = 0;
+				m->acknowledge_pending = 0;			
+				q921_dump(m, h, len, 1, 0);
 			}
 		}
 
@@ -1923,6 +1728,7 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 			n_r_error_recovery(m);
 			q921_setstate(m, Q921_AWAITING_ESTABLISHMENT);
 		} else {
+			
 			if (m->q921_state == Q921_TIMER_RECOVERY) {
 				update_v_a(m, h->i.n_r);
 			} else {
@@ -1930,9 +1736,26 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 					update_v_a(m, h->i.n_r);
 				} else {
 					if (h->i.n_r == m->v_s) {
+						q921_dump(m, h, len, 1, 0);
 						update_v_a(m, h->i.n_r);
 						stop_t200(m);
 						start_t203(m);
+
+						if (tmp_flag == 0 && h->i.n_s != m->v_r)
+						{
+							LOG_W("Possible for 31 isdn part!, ns=%d, vr=%d", h->i.n_s, m->v_r);
+							m->v_r = (h->i.n_s + 1) % 128;
+							m->bad_n_s_count = 0;	
+							m->reject_exception = 0;
+							delay_q931_receive = 1;
+							if (h->i.p_f) {
+								q921_rr(m, 1, 0);
+								m->acknowledge_pending = 0;
+							} else {
+								m->acknowledge_pending = 1;
+							}
+						}
+
 					} else {
 						if (h->i.n_r != m->v_a) {
 							update_v_a(m, h->i.n_r);
@@ -1944,16 +1767,7 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 		}
 		if (delay_q931_receive) {
 			/* Q.921 has finished processing the frame so we can give it to Q.931 now. */
-			/* XXX */
-#if 0
-			res = q931_receive(m, (q931_h *) h->i.data, len - 4);
-#endif
-			send_isdn_msg(m->e1_no, (u8_t *)h->i.data, len - 4);
-			/*
-			if (res != -1 && (res & Q931_RES_HAVEEVENT)) {
-				eres = &ctrl->ev;
-			}
-			*/
+			send_isdn_msg(m->e1_no, (u8_t *)h->i.data, len - 4);		
 		}
 		break;
 	case Q921_TEI_ASSIGNED:
@@ -1965,8 +1779,8 @@ static int q921_iframe_rx(mtp2_t *m, q921_h *h, int len)
 		 */
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Don't know what to do with an I-frame in state %d(%s)\n",
-			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: Don't know what to do with an I-frame in state %d(%s)",
+			m->e1_no, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
@@ -1977,7 +1791,7 @@ static int q921_dm_rx(mtp2_t *m, q921_h *h)
 {
 	int res = 0;
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: TEI=%d Got DM\r\n",m->e1_no, m->tei));
+	LOG_I("%d E1: TEI=%d Got DM",m->e1_no, m->tei);
 
 	switch (m->q921_state) {
 	case Q921_TEI_ASSIGNED:
@@ -2019,12 +1833,9 @@ static int q921_dm_rx(mtp2_t *m, q921_h *h)
 		q921_establish_data_link(m);
 		m->l3_initiated = 0;
 		q921_setstate(m, Q921_AWAITING_ESTABLISHMENT);
-		/*
-		if (PTP_MODE(ctrl)) {
-			ctrl->ev.gen.e = PRI_EVENT_DCHAN_DOWN;
-			res = &ctrl->ev;
-		}
-		*/
+
+		ram_params.e1_l2_alarm &= ~(1 << m->e1_no);
+        link_outof_service(m->e1_no, LKALARM_WORKING);
 		break;
 	case Q921_TIMER_RECOVERY:
 		if (h->u.p_f) {
@@ -2043,8 +1854,8 @@ static int q921_dm_rx(mtp2_t *m, q921_h *h)
 		*/
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Don't know what to do with DM frame in state %d(%s)\n",
-			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: Don't know what to do with DM frame in state %d(%s)",
+			m->e1_no, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
@@ -2055,7 +1866,7 @@ static int q921_rnr_rx(mtp2_t *m, q921_h *h)
 {
 	int res = 0;
 
-	CARD_DEBUGF(MTP_DEBUG, ("%d E1: TEI=%d Got RNR N(R)=%d\n", m->e1_no, m->tei, h->s.n_r));
+	LOG_I("%d E1: TEI=%d Got RNR N(R)=%d", m->e1_no, m->tei, h->s.n_r);
 
 	switch (m->q921_state) {
 	case Q921_MULTI_FRAME_ESTABLISHED:
@@ -2073,6 +1884,9 @@ static int q921_rnr_rx(mtp2_t *m, q921_h *h)
 		if (!n_r_is_valid(m, h->s.n_r)) {
 			n_r_error_recovery(m);
 			q921_setstate(m, Q921_AWAITING_ESTABLISHMENT);
+			ram_params.e1_l2_alarm &= ~(1 << m->e1_no);
+        	link_outof_service(m->e1_no, LKALARM_L3);
+
 		} else {
 			update_v_a(m, h->s.n_r);
 			stop_t203(m);
@@ -2127,8 +1941,8 @@ static int q921_rnr_rx(mtp2_t *m, q921_h *h)
 		 */
 		break;
 	default:
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Don't know what to do with RNR in state %d(%s)\r\n",
-			m->e1_no, m->q921_state, q921_state2str(m->q921_state)));
+		LOG_W("%d E1: Don't know what to do with RNR in state %d(%s)",
+			m->e1_no, m->q921_state, q921_state2str(m->q921_state));
 		break;
 	}
 
@@ -2162,7 +1976,8 @@ static int __q921_receive_qualified(mtp2_t *m, q921_h *h, int len)
 {
 	int res;
 
-	switch (h->h.data[0] & Q921_FRAMETYPE_MASK) {
+    u8_t *data = &(h->raw[2]);
+	switch (data[0] & Q921_FRAMETYPE_MASK) {
 	case 0:
 	case 2:
 		res = q921_iframe_rx(m, h, len);
@@ -2179,14 +1994,14 @@ static int __q921_receive_qualified(mtp2_t *m, q921_h *h, int len)
 			res = q921_rej_rx(m, h);
 			break;
 		default:
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: !! XXX Unknown Supervisory frame x0=%d ss=%d, pf=%d, N(R)=%d, V(A)=%d, V(S)=%d XXX\r\n",
-				m->e1_no, h->s.x0, h->s.ss, h->s.p_f, h->s.n_r, m->v_a, m->v_s));
+			LOG_W("%d E1: !! XXX Unknown Supervisory frame x0=%d ss=%d, pf=%d, N(R)=%d, V(A)=%d, V(S)=%d XXX",
+				m->e1_no, h->s.x0, h->s.ss, h->s.p_f, h->s.n_r, m->v_a, m->v_s);
 			break;
 		}
 		break;
 	case 3:
 		if (len < 3) {
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: !! Received short unnumbered frame\r\n", m->e1_no));
+			LOG_E("%d E1: !! Received short unnumbered frame", m->e1_no);
 			break;
 		}
 		switch ((h->u.m3 << 2) | h->u.m2) {
@@ -2205,8 +2020,8 @@ static int __q921_receive_qualified(mtp2_t *m, q921_h *h, int len)
 			break;
 		case 0x0F:
 			/* SABME */
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: TEI=%d Got SABME from %s peer.\r\n",
-					m->e1_no, m->tei, h->h.c_r ? "network" : "cpe"));
+			LOG_I("%d E1: TEI=%d Got SABME from %s peer.",
+					m->e1_no, m->tei, h->h.c_r ? "network" : "cpe");
 			if (h->h.c_r) {
 				//ctrl->remotetype = PRI_NETWORK;
 				if (m->pri_mode == PRI_NETWORK) {
@@ -2218,7 +2033,7 @@ static int __q921_receive_qualified(mtp2_t *m, q921_h *h, int len)
 				//ctrl->remotetype = PRI_CPE;
 				if (m->pri_mode == PRI_CPE) {
 					/* We can't both be CPE */
-					//ev = pri_mkerror(ctrl, "We think we're the CPE, but they think they're the CPE too.\n");
+					//ev = pri_mkerror(ctrl, "We think we're the CPE, but they think they're the CPE too.");
 					break;
 				}
 			}
@@ -2231,11 +2046,11 @@ static int __q921_receive_qualified(mtp2_t *m, q921_h *h, int len)
 			res = q921_frmr_rx(m, h);
 			break;
 		case 0x17:
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: !! XID frames not supported\r\n", m->e1_no));
+			LOG_W("%d E1: !! XID frames not supported", m->e1_no);
 			break;
 		default:
-			CARD_DEBUGF(MTP_DEBUG, ("%d E1: !! Don't know what to do with u-frame (m3=%d, m2=%d)\r\n",
-				m->e1_no,h->u.m3, h->u.m2));
+			LOG_W("%d E1: !! Don't know what to do with u-frame (m3=%d, m2=%d)",
+				m->e1_no,h->u.m3, h->u.m2);
 			break;
 		}
 		break;
@@ -2263,14 +2078,14 @@ void q921_start(mtp2_t *m)
 	q921_establish_data_link(m);
 	m->l3_initiated = 1;
 	q921_setstate(m, Q921_AWAITING_ESTABLISHMENT);
+	LOG_W("%d E1 Start ISDN-PRI alignment!", m->e1_no);
 }
 
 int q921_receive(mtp2_t *m, q921_h *h, int len)
 {
 	int ret = 0;
-	int debug = 1;
 
-	q921_dump(m, h, len, debug, 0);
+	//q921_dump(m, h, len, debug, 0);
 
 	/* Check some reject conditions -- Start by rejecting improper ea's */
 	if (h->h.ea1 || !h->h.ea2) {
@@ -2282,8 +2097,8 @@ int q921_receive(mtp2_t *m, q921_h *h, int len)
 	}
 
 	if (h->h.tei == Q921_TEI_GROUP && h->h.sapi != Q921_SAPI_CALL_CTRL) {
-		CARD_DEBUGF(MTP_DEBUG, ("%d E1: Do not handle group messages to services other than MDL or CALL CTRL\r\n",
-				m->e1_no));
+		LOG_W("%d E1: Do not handle group messages to services other than MDL or CALL CTRL",
+				m->e1_no);
 		return -1;
 	}
 
@@ -2295,4 +2110,16 @@ int q921_receive(mtp2_t *m, q921_h *h, int len)
 
 	return ret;
 }
+
+void q921_cleanup(mtp2_t *m)
+{
+    stop_t200(m);
+    stop_t203(m);
+
+    q921_clear_exception_conditions(m);
+    
+	q921_setstate(m, Q921_TEI_UNASSIGNED);
+    LOG_W("isdn cleanup on link '%d'", m->e1_no);
+}
+
 

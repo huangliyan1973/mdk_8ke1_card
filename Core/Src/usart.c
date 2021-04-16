@@ -21,7 +21,8 @@
 #include "usart.h"
 
 /* USER CODE BEGIN 0 */
-#include <stdio.h>
+#include <stdint.h>
+#include "ulog.h"
 /* USER CODE END 0 */
 
 UART_HandleTypeDef huart1;
@@ -113,6 +114,7 @@ void _sys_exit(int x)
 	x = x;
 }
 
+
 #ifdef __GNUC__
 /* With GCC/RAISONANCE, small printf (option LD Linker->Libraries->Small printf
 set to 'Yes') calls __io_putchar() */
@@ -122,9 +124,25 @@ set to 'Yes') calls __io_putchar() */
 #endif /* __GNUC__ */
 PUTCHAR_PROTOTYPE
 {
-	//HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xff);
-    ITM_SendChar(ch);
+	HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xffff);
 	return ch;
+}
+
+static struct ulog_backend console = {0};
+
+void ulog_console_backend_output(struct ulog_backend *backend, const char *log_buf, size_t log_len)
+{
+  HAL_UART_Transmit(&huart1, (uint8_t *)log_buf, log_len, 0xffff);
+}
+
+int ulog_console_backend_init(void)
+{
+  ulog_init();
+  console.output = ulog_console_backend_output;
+
+  ulog_backend_register(&console, "uart1", 1);
+
+  return 0;
 }
 
 /* USER CODE END 1 */

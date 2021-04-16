@@ -41,30 +41,36 @@ typedef struct {
 	u8_t 	dtmf_mark_space[2];
 	u8_t 	tone_src;
     
+    u8_t    version;
+    
     struct {
         u8_t type;
         u8_t pc1[3];
         u8_t pc2[3];      
     }pc_magic[E1_PORT_PER_CARD];
     
-    u32_t version;
+	u8_t   	reserved[128]; // contain for future purpose.
+	u8_t 	iap_value;
+    
 } e1_params_t;
 
 typedef struct {
 	u8_t 	init_flag;
-	u8_t 	led_status[8];
+	u8_t 	led_status[E1_PORT_PER_CARD];
 	u8_t 	e1_l1_alarm;
 	u8_t 	e1_l2_alarm;
 	u8_t 	cpu_loading;
 	u8_t	conf_module_installed;
 	u8_t	mfc_module_installed;
-	u8_t 	loopback_flag[8];
+	u8_t 	loopback_flag[E1_PORT_PER_CARD];
+	u8_t	e1_status[E1_PORT_PER_CARD];
+	u8_t 	e1_status_last[E1_PORT_PER_CARD];
 	u32_t 	timestamp;
 } ram_params_t;
 
 typedef struct {
 	u8_t 	conf_grp;
-	u8_t 	first_abcd;
+	u8_t 	ls_out;
 	u8_t 	chk_times;
 	u8_t 	ls_in;
 	u8_t 	old_mfc_par;
@@ -74,8 +80,11 @@ typedef struct {
 	u8_t	connect_tone_flag;
 	u8_t	dmodule_ctone;
 	u8_t 	dslot_ctone;
-    u8_t    connect_time;
+    u16_t    connect_time;
 	u8_t	port_to_group;
+	u8_t 	ct_delay;
+	u8_t 	echo_state;
+	u8_t 	tone_count;
 } slot_t;
 
 extern e1_params_t	e1_params;
@@ -86,5 +95,21 @@ extern u8_t group_user[81];
 extern void update_eeprom(void);
 extern void reload_eeprom(void);
 extern void init_eeprom(void);
+extern void load_default_param(void);
+
+#define VOICE_450HZ_TONE      16
+#define VOICE_950HZ_TONE      19
+#define VOICE_SILENT_TONE     0
+
+#define MAX_RING        100
+#define MAX_BUSY        14
+#define MAX_CONFIRM     40
+#define MAX_HOLDING     25
+#define MAX_HINT        100
+#define MAX_TEMP        100
+#define MAX_ALERT       100
+
+
+extern void tone_rt(u8_t slot);
 
 #endif /* INC_EEPROM_H_ */

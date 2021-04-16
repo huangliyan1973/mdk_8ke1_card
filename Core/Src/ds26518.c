@@ -11,30 +11,26 @@
 #include "ds26518.h"
 #include "main.h"
 #include "usart.h"
-#include "card_debug.h"
+#include "zl50020.h"
 #include "mtp.h"
+#include "eeprom.h"
 #include "lwip/sys.h"
+#include "lwip/def.h"
+
+#define LOG_TAG              "ds26518"
+#define LOG_LVL              LOG_LVL_DBG
+#include "ulog.h"
 
 /* FSMC_NE2 for ds26518 */
 #define DS26518_BASE			(0x64000000)
 #define DS26518_DEVICE			(DEVICE *)DS26518_BASE
 
-#define MTP_DEBUG                CARD_DBG_ON
+//#define IBO_ENABLE
 
 static FRAMER *ds26518_global_framer(void)
 {
 	DEVICE *dev = DS26518_DEVICE;
 	return  (FRAMER *)&dev->te1[0];
-}
-
-static void delay_us(void)
-{
-	FRAMER *f = ds26518_global_framer();
-	UC i = f->idr;
-
-	for(i=0; i < 10; i++){
-		;
-	}
 }
 
 static FRAMER *ds26518_framer(int e1_no)
@@ -47,6 +43,18 @@ static LIU *ds26518_liu(int e1_no)
 {
 	DEVICE *dev = DS26518_DEVICE;
 	return (LIU *)&dev->liu[e1_no];
+}
+
+static BERT *ds26518_bert(int e1_no)
+{
+	DEVICE *dev = DS26518_DEVICE;
+	return (BERT *)&dev->bert[e1_no];
+}
+
+static EXTBERT *ds26518_exbert(int e1_no)
+{
+    DEVICE *dev = DS26518_DEVICE;
+	return (EXTBERT *)&dev->extbert[e1_no];
 }
 
 #if 0
@@ -64,9 +72,11 @@ void set_ds26518_interrupt(int e1_no, int enable)
 	if (enable) {
 		f->gfimr1 |= (1 << e1_no);
 		f->glimr1 |= (1 << e1_no);
+		//LOG_I("Enable '%d' E1 interrupt", e1_no);
 	} else {
 		f->gfimr1 &= ~(1 << e1_no);
 		f->glimr1 &= ~(1 << e1_no);
+		//LOG_I("Disable '%d' E1 interrupt", e1_no);
 	}
 }
 
@@ -75,9 +85,24 @@ void set_ds26518_global_interrupt(int enable)
 	FRAMER *f = ds26518_global_framer();
 	if (enable) {
 		f->gtcr1 &= ~GTCR1_GIPI;
+		//LOG_I("Enable E1 global interrupt");
 	} else {
 		f->gtcr1 |= GTCR1_GIPI;
+		//LOG_I("Disable E1 global interrupt");
 	}
+}
+
+void ds26518_set_idle_code(u8_t e1_no, u8_t slot, u8_t idle_code, u8_t flag)
+{
+    FRAMER *f = ds26518_framer(e1_no);
+    
+    if (flag) {
+        f->tidr[slot] = idle_code;
+        ds26518_e1_slot_enable(e1_no, slot, VOICE_INACTIVE);
+    } else {
+        f->tidr[slot] = 0xD5;
+        ds26518_e1_slot_enable(e1_no, slot, VOICE_ACTIVE);
+    }
 }
 
 static void ds26518_tcice_init(int e1_no)
@@ -90,6 +115,198 @@ static void ds26518_tcice_init(int e1_no)
 	f->tcice[3] = 0xff;
 }
 
+static void ds25618_ts_init(int e1_no)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+
+	f->ts[0] = 0x0b; // 时隙0的高四位必须为0， 用于复帧同步信号(CAS MF)
+
+	memset((void *)&f->ts[1], 0xBB, 15); // 0b 表示线路空闲。
+
+	int base = e1_no << 5;
+
+	slot_params[base].ls_out = 0;
+	slot_params[base].ls_in = 0;
+
+	for (int i = 1; i < MAX_E1_TIMESLOTS; i++) {
+		slot_params[base + i].ls_out = 0xb;
+		slot_params[base + i].ls_in = 0;
+	}
+}
+
+void read_rx_abcd(int e1_no, u8_t *rv_abcd)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	u8_t value;
+	
+	for (int i = 1; i < MAX_E1_TIMESLOTS / 2; i++) {
+		value = f->rs[i];
+		*(rv_abcd + i) = ((value & 0xf0) >> 4);
+		*(rv_abcd + i + 16) = (value & 0x0f);
+	}
+    
+}
+
+void out_tx_abcd(int e1_no, u8_t slot, u8_t value)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+
+	if (slot == 0 || slot == 0x10) {
+		return;
+	}
+	u8_t tot_index = (e1_no << 5) + slot;
+	slot_params[tot_index].ls_out = value & 0xf;
+
+	u8_t index = (slot > 15) ? (slot - 16) : slot;
+	u8_t bits = value & 0xf;
+	if (slot > 15) {
+		bits = (slot_params[tot_index - 16].ls_out << 4) | bits;
+	} else {
+		bits = (slot_params[tot_index + 16].ls_out) | (bits << 4);
+	}
+
+	f->ts[index] = bits;
+#if 0
+	LOG_I("'%d' E1 '%d' slot SET line code is %02x, ts value=%02x", 
+        e1_no, slot, value, f->ts[index]);
+#endif
+}
+
+u8_t read_liu_status(int e1_no)
+{
+	static u8_t liu_status[8];
+
+	LIU *l = ds26518_liu(e1_no);
+
+	u8_t ret = (l->lrsr > 0 ? 1 : 0);
+	//l->llsr = ret;
+
+	if (liu_status[e1_no & 7] != ret) {
+		LOG_W("link '%d' liu status = %x", e1_no, ret);
+		liu_status[e1_no & 7] = ret;
+	}
+
+	return ret;
+}
+
+char *get_lrsr_value(u8_t lrsl)
+{
+	u8_t value = lrsl >> 4;
+	static char *signal_level[] = {
+		">-2.5",
+		"-2.5 to -5",
+		"-5 to -7.5",
+		"-7.5 to -10",
+		"-10 to -12.5",
+		"-12.5 to -15",
+		"-15 to -17.5",
+		"-17.5 to -20",
+		"-20 to -22.5",
+		"-22.5 to -25",
+		"-25 to -27.5",
+		"-27.5 to -30",
+		"-30 to -32.5",
+		"-32.5 to -35",
+		"-35 to -37.5",
+		"<-37.5"
+	};
+
+	return signal_level[value & 0xf];
+}
+/* >0 mean liu has some problem */
+u8_t check_liu_status(int e1_no)
+{
+
+	LIU *l = ds26518_liu(e1_no);
+	u8_t llsr = l->llsr;
+	u8_t lrsr = l->lrsr;
+
+	if (llsr & 1){
+		if (lrsr & 1) {
+			LOG_W("Loss of Signal Detect (LOSD) on %d LINK\r\n", e1_no);
+		}else {
+			LOG_W("Loss of Signal Detect (LOSD) on %d LINK, but real status not show", e1_no);
+		}
+	}
+	if (llsr & 2){
+		
+		LOG_W("Short-Circuit Detect (SCD) on %d LINK, lrsr=%x", e1_no, lrsr);
+	}
+	if (llsr & 4){
+		LOG_W("Open-Circuit Detect (OCD) on %d LINK, lrsr=%x", e1_no, lrsr);
+	}
+	if (llsr & 0x10){
+		LOG_W("Loss of Signal Clear (LOSC) on %d LINK\r\n", e1_no);
+	}
+	if (llsr & 0x20){
+		LOG_W("Short-Circuit Clear (SCC) on %d LINK\r\n", e1_no);
+	}
+	if (llsr & 0x40){
+		LOG_W("Open-Circuit Clear (OCC) on %d LINK\r\n", e1_no);
+	}
+#if 0
+	if (lrsl[e1_no] != lrsl_value && lrsl_value > 0) {
+		LOG_I("LIU Receive signal Level = %s on %d LINK\r\n", get_lrsr_value(lrsl_value), e1_no);
+		lrsl[e1_no] = lrsl_value;
+	}
+#endif
+	return llsr;
+}
+
+void read_e1_status(void)
+{
+    static u8_t l1_status = 0;
+	LIU *l;
+	u8_t status, llsr, lrsl;
+	u8_t siglost = 0;
+    
+	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+		l = ds26518_liu(i);
+        llsr = l->llsr;
+		lrsl = l->lrsl;
+		if ((llsr & 0x7) > 0 || (lrsl >> 4) > 1) {
+			/* Bit 3: Jitter Attenuator Limit Trip Set
+			* Bit 2: Open-Circuit Detect
+			* Bit 1: Short-Circuit Detect
+			* Bit 0: Loss of Signal Detect
+			*/			
+			status = 1;
+		} else {
+			status = 0;
+		}
+
+		siglost |= (status << i);
+
+		//l->llsr = llsr;
+		l->llsr = check_liu_status(i);
+	}
+    
+    if (l1_status != siglost) {
+        LOG_W("L1 status changed! %x --> %x", l1_status, siglost);
+        l1_status = siglost;
+    }
+    
+	ram_params.e1_l1_alarm = siglost & (~(ram_params.conf_module_installed << 6));
+	
+	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+		u8_t j = (siglost >> i) & 1;
+		if (ram_params.e1_status[i] != j) {
+			if (ram_params.e1_status_last[i] > 5) {
+				LOG_W("E1 '%d' change L1 status %x <-- %x", i, j, ram_params.e1_status[i]);
+				ram_params.e1_status[i] = j;
+				if (j == 0 && is_ccs_port(i)) {
+					/*Link is connected!*/
+					start_mtp2_process(i);
+				}
+			} else {
+				ram_params.e1_status_last[i]++;
+			}
+		} else {
+			ram_params.e1_status_last[i] = 0;
+		}
+	}
+}
+
 void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 {
 	FRAMER *f = ds26518_framer(e1_no);
@@ -97,16 +314,20 @@ void ds26518_e1_slot_enable(int e1_no, int slot, enum SLOT_ACTIVE active)
 	if (slot == 0 || slot == 16) {
 		return;
 	}
-
-	uint32_t *val = (uint32_t *)&(f->tcice[0]);
-	uint32_t mask = (uint32_t)(1L << (slot & 0x1F));
+	
+	u8_t index = (u8_t)(slot >> 3);
+	u8_t bit_mask = (1 << (u8_t)(slot & 0x7));
 
 	if (active == VOICE_ACTIVE) {
-		*val = (*val) & (~mask);
+		f->tcice[index] &= (~bit_mask);
 	} else {
-		*val = (*val) | mask;
+		f->tcice[index] |= bit_mask;
 	}
-	CARD_DEBUGF(MTP_DEBUG, ("tcice value = %04X\n", *val));
+/**
+	LOG_D("'%d' E1 '%d' slot set %s , tcice=%02x %02x %02x %02x",
+        e1_no, slot, active == VOICE_ACTIVE ? "Enable":"Disable", 
+        f->tcice[0], f->tcice[1], f->tcice[2], f->tcice[3]);
+*/
 }
 
 
@@ -116,7 +337,7 @@ void set_ds26518_backplane_refclock(enum BACKPLANE_REFERENCE back_ref)
 
 	f->gtccr1 = (f->gtccr1 & 0x0f) | (back_ref << 4);
 
-	delay_us();
+	LOG_I("set ds26518 ref clock, GTCCR1=%x, back_ref=%d", f->gtccr1, back_ref);
 }
 
 /*
@@ -141,21 +362,19 @@ void set_ds26518_master_clock(enum BACKPLANE_REFERENCE back_ref)
 		back_ref = MCLK;
 	}
 	set_ds26518_backplane_refclock(back_ref);
-	set_ds26518_tclk_src(TCLK_PIN);
+	//set_ds26518_tclk_src(TCLK_PIN);
 
-	f->gtcr3 = 0x3;
-	f->gtccr3 = GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL ;
 }
 
 void set_ds26518_slave_clock(void)
 {
 	FRAMER *f = ds26518_global_framer();
 
-	set_ds26518_backplane_refclock(REFCLKIO); //???
-	set_ds26518_tclk_src(TCLK_PIN);
+	set_ds26518_backplane_refclock(REFCLKIO); 
+	//set_ds26518_tclk_src(TCLK_PIN);
 
-	f->gtcr3 = 0x1;
-	f->gtccr3 = 0;
+	//f->gtcr3 = 0x1;
+	//f->gtccr3 = 0;
 }
 
 void set_ds26518_signal_slot(int e1_no, UC signal_slot)
@@ -233,12 +452,20 @@ void ds26518_global_init(void)
 	 * 			  MPS = 10, MCLK = 8.192M
 	 * 			  MPS = 11, MCLK = 16.384M
 	 */
-	f->gtccr1 = 0x80; //2.048MHz derived from MCLK. (REFCLKIO is an output.)
-
+	if ((card_id & 0xf) > 0) {
+		/* REFCLKIO is input */
+		f->gtccr1 = 0x90;
+	}else {
+		/* 2.048MHz derived from MCLK. (REFCLKIO is an output.) */
+		f->gtccr1 = 0x80; 
+	}
+	
+	LOG_W("REF CLOCK = %x", f->gtccr1);
+	
 	dummy = f->idr;		/* delay at least 300 ns */
 	dummy = f->idr;
 
-	CARD_DEBUGF(MTP_DEBUG,("DS26518 ID=%"X8_F"\n", dummy));
+	LOG_D("DS26518 ID=%02X", dummy);
 
 	for(i = 0; i < sizeof(DEVICE); i++, ucp++) {
 		if(i >= 0x00f0 && i <= 0x00ff)
@@ -251,13 +478,14 @@ void ds26518_global_init(void)
 			continue;
 		*ucp = 0;
 	}
+    HAL_Delay(1);
 	/* GTCR1
 	 * RLOF output,
-	 * 528MD enabled,
+	 * 528MD disable,
 	 * disable global interrupt
 	 * use internal ibo mux
 	 * */
-	f->gtcr1 = GTCR1_GPSEL(0) | GTCR1_GIPI ; //| GTCR1_528MD;
+	f->gtcr1 = GTCR1_GIPI ; 
 
 	/* GFCR1
 	 * BIT7-BIT6 = 3: IBO MODE: 16.384M (8 devices on TSER1 and RSER1)
@@ -266,25 +494,27 @@ void ds26518_global_init(void)
 	 * TCHBLK/TCHCLK[8:1] pins output TCHBLK[8:1] (Transmit Channel Block)
 	 * RCHBLK/RCHCLK[8:1] pins output RCHBLK[8:1] (Receive Channel Block)
 	 */
-	f->gfcr1 = GFCR1_IBOMS(3) | GFCR1_BPCLK(3) ;
-
 	/* GTCR3
 	 * Bit 1 = 0, TSSYNCIOn are Input PIN.
 	 * 		 = 1, TSSYNCIOn are Output sync to BPCLK1.
 	 * Bit 0 = 0, TSYNCn is selected for TSYNC/TSSYNCIO[8:1] pins
 	 *       = 1, TSSYNCIOn is selected for TSYNC/TSSYNCIO[8:1] pins.
 	 */
-	f->gtcr3 = 0x3;
+
+	f->gfcr1 = GFCR1_IBOMS(0) | GFCR1_BPCLK(3); // disable IBO, 8.192M BPCLK1
+	f->gtcr3 = 0x0;
+
 
 	/*GTCCR3
 	 * BIT6 = 1 Use BPCLK1 as the master clock for all eight receive system clocks (Channels 1–8).
+	 * 		= 0 Use RSYSCLKn pins for each receive system clock (Channels 1–8).
 	 * BIT5 = 1 Use BPCLK1 as the master clock for all eight transmit system clocks (Channels 1–8).
+	 * 		= 0 Use TSYSCLKn pins for each transmit system clock (Channels 1–8).
 	 * BIT4 = 0: Use TCLKn pins for each of the transmit clock (Channels 1–8).
 	 * 		= 1: Use REFCLKIO as the master clock for all eight transmit clocks (Channels 1–8).
 	 */
-	f->gtccr3 = GTCCR3_RSYSCLKSEL | GTCCR3_TSYSCLKSEL ;
 
-	set_ds26518_global_interrupt(0);
+	f->gtccr3 = 0;
 
 }
 
@@ -386,36 +616,43 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 *       = 1, CRC-4 enabled.
 	 */
 	f->tcr1 = TCR1_TSIS | TCR1_THDB3;
+	//f->tcr1 = TCR1_TSIS ;
 	if (sig_type == CAS_TYPE) {
-		f->tcr1 |= TCR1_T16S;
-	}
+		f->tcr1 |= TCR1_T16S | TCR1_THDB3;
+		ds25618_ts_init(e1_no);
+	} 
 
 	/* TIBOC
 	 * Bit 4 = 1, Frame Interleave.
 	 * Bit 3 = 1, Interleave Bus Operation enabled.
 	 */
+#ifdef IBO_ENABLE
 	f->tiboc = TIBOC_IBOSEL | TIBOC_IBOEN;
+#else
+	f->tiboc = 0;
+#endif
 
 	/* E1AF, MUST be 0x1b */
-	f->tslc1_taf = 0x1b;
+	f->tslc1_taf = 0x9b;
 
 	/* E1NAF, MUST be 0x40 */
-	f->tslc2_tnaf = 0x40;
+	f->tslc2_tnaf = 0xdf;
 
 	/* TIOCR
 	 * Bit7 = 0, TCLKn No inversion.
 	 * Bit6 = 0, TSYNCn No inversion.
 	 * Bit5 = 0, TSSYNCIOn No inversion.
+	 * 
 	 * Bit4 = 1, If TSYSCLKn is 2.048/4.096/8.192MHz or IBO enabled.
 	 * Bit3 = 0, TSSYNCIOn Mode Select Frame mode.
-	 * Bit2 = 0, TSYNCn I/O Select input.
+	 * Bit2 = 0, TSYNCn I/O Select input,  1: TSYNC I/O Select output.
 	 * Bit0 = 0, TSYNCn Mode Select Frame mode.
 	 */
-	f->tiocr = TIOCR_TSCLKM;
-
-	/* Transmit Elastic store is enabled */
-	f->tescr = TESCR_TESE;
-
+	/* Disable Transmit Elastic store */
+	f->tescr = 0;
+	f->tiocr = TIOCR_TSCLKM;  //TSYNC为输入信号
+	//f->tiocr = TIOCR_TSIO | TIOCR_TSCLKM; //定义TSYNC为输出
+	
 	/* TXPC
 	 * Bit 7 = 0 ,Transmit HDLC-256 Mode Select assigned to time slots
 	 * Bit 6 = 0, Transmit HDLC-256 is not active.
@@ -428,20 +665,28 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	memset((void *)f->thcs, 0, 4);
 
 	/* Software-Signaling Insertion Enable Registers 1 to 4 */
-	memset((void *)f->ssie, 0, 4);
-
+    #if 0
+	if (sig_type == CAS_TYPE) {
+		f->ssie[0] = 0xFE;
+		f->ssie[1] = 0xFF;
+		f->ssie[2] = 0xFE;
+		f->ssie[3] = 0xFF;
+	} else {
+		memset((void *)f->ssie, 0, 4);
+	}
+    #endif
+    
 	/* The Transmit Idle Code Definition Registers */
 	memset((void *)f->tidr, 0xD5, 32);
 
 	/* The Transmit Channel Idle Code Enable registers */
 	ds26518_tcice_init(e1_no);
 
-	//f->ts[0] = 0xB; // 0 slot send bit.
-
 	f->tsacr = 0x0;
 
 	/* 设置接收端参数 */
-	f->rmmr |= RMMR_FRM_EN | RMMR_T1E1 | RMMR_DRSS;
+	//f->rmmr |= RMMR_FRM_EN | RMMR_T1E1 | RMMR_DRSS;
+	f->rmmr |= RMMR_FRM_EN | RMMR_T1E1 ;
 
 	/* RCR1
 	 * Bit 6 = 1, HDB3 enabled
@@ -478,15 +723,23 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	 * Bit 4 = 1, Frame Interleave.
 	 * Bit 3 = 1, Interleave Bus Operation enabled.
 	 */
+#ifdef IBO_ENABLE
 	f->riboc = RIBOC_IBOSEL | RIBOC_IBOEN;
+#else
+	f->riboc = 0;
+#endif
 
+	//l->ltrcr = 0x0;
+	//l->ltipsr = LTIPSR_TIMPTON;
+	//l->lrismr = LRISMR_RIMPON | LRISMR_RIMPM(4); //75Ω internal termination
+	//l->lrcr = 3; // 43db
 
-	l->ltrcr = 0x0; //Jitter attenuator FIFO depth 128 bits and in the receive path. E1,G.775
-	l->ltipsr = LTIPSR_TIMPTON; //Enable transmit terminating impedance.E1, 75Ohm
+	l->ltrcr = 0x20; //Jitter attenuator FIFO depth 32 bits and in the receive path. E1,G.775
+	l->ltipsr = LTIPSR_TIMPTON | LTIPSR_TIMPL(3) | 1; //Enable transmit terminating impedance.E1, 120hm
 
-	l->lrismr = LRISMR_RIMPON | LRISMR_RIMPM(4); //75Ω internal termination
+	l->lrismr = LRISMR_RIMPON | LRISMR_RIMPM(3); //120Ω internal termination
 
-	l->lrcr = 3; //43db for E1
+	l->lrcr = 0; //15 db
 
 	/* after the configuration turn on the framer */
 	f->tmmr |= TMMR_INIT_DONE;
@@ -498,10 +751,13 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 	/* set hdlc64 */
 	if (sig_type == CCS_TYPE){
 		ds26518_hdlc64_init(e1_no);
-	}
+	} else {
+        f->thc2 = 0;
+        f->rhc = 0;
+    }
 
 	HAL_Delay(1);
-
+	
 	/* Open interrupt */
 	f->rim1 |= RIM1_RLOSD | RIM1_RLOFD | RIM1_RLOSC | RIM1_RLOFC;
 	f->rim2 = RIM2_RAF;
@@ -514,6 +770,8 @@ void ds26518_port_init(int e1_no, enum SIG_TYPE sig_type)
 
 	/* Last interrupt global active step */
 	set_ds26518_global_interrupt(1);
+
+LOG_D("E1 port '%d' init finished ON %s TYPE!", e1_no, sig_type == CCS_TYPE ? "CCS_TYPE" : "CAS_TYPE");
 
 }
 
@@ -535,14 +793,14 @@ void disable_e1_transmit(int e1_no)
 {
 	LIU	*liu = ds26518_liu(e1_no);
 
-	liu->lmcr &= 0xfe;
+	liu->lmcr = LMCR_TPDE | LMCR_RPDE ;
 }
 
 void enable_e1_transmit(int e1_no)
 {
 	LIU	*liu = ds26518_liu(e1_no);
 
-	liu->lmcr |= 0x1;
+	liu->lmcr = LMCR_TE;
 }
 
 void set_ds26518_loopback(int e1_no, enum LOOPBACK_TYPE lp_type)
@@ -583,11 +841,34 @@ void ds26518_tx_set(u8_t e1_no, u8_t *buf, u8_t len, u8_t end_flag)
 
 	if (end_flag == 1) {
 		// Last Byte to Send.
-		f->thc1 |= THC1_TEOM; // bit2 of thc1 TEOM
+        f->thc1 |= THC1_TEOM; // bit2 of thc1 TEOM
 	}
 	f->thf = buf[i];
 }
 
+void ds26518_send_sio_test(void)
+{
+	u8_t buf[4] = {0xff, 0xff, 1, 0};
+	FRAMER *f = ds26518_framer(0);
+
+	u8_t count = f->tfba;
+	if (count > 4) {
+		if(f->thc1 & THC1_TEOM){
+			f->thc1 &= (~THC1_TEOM);
+			while (f->thc1 & THC1_TEOM);
+			LOG_I("CLEAR THC1_TEMO flag, thc1=%2X", f->thc1);
+		}
+		for (int i = 0; i < 3; i++) {
+			f->thf = buf[i];
+		}
+
+		f->thc1 |= THC1_TEOM; // bit2 of thc1 TEOM
+		f->thf = buf[3];
+		LOG_I("Send SIO end!");
+	}
+}
+
+#if 0
 void ds26518_isr(void)
 {
 	u8_t index;
@@ -659,303 +940,381 @@ void ds26518_isr(void)
 		}
 	}
 }
+#endif
 
-#if 0
-void ds26518_isr(void)
+/* Below for Ds26518 poll function */
+
+void ds26518_tx_rx_poll(int e1_no)
 {
-	LIU	*liu;
+	FRAMER *f = ds26518_framer(e1_no & 7);
 
+	u8_t rv_status = f->rhpba;
+	u8_t rv_len = rv_status & 0x7f;
+
+	if (rv_status != 0x80) {
+		while (rv_len > 0) {
+			rv_ccs_byte(e1_no, f->rhf);
+			rv_len--;
+		}
+
+		if ((rv_status & RHPBA_MS) == 0) {
+			rv_status = ((f->rrts5) >> 4) & 0x7;
+			if (rv_status == 1) {
+				check_ccs_msg(e1_no);
+			} else if (rv_status > 0) {
+				bad_msg_rev(e1_no, rv_status);
+			} 
+		}
+	}
+	
+	u8_t count = f->tfba;
+	if (count > 0) {
+		if(f->thc1 & THC1_TEOM){
+			f->thc1 &= (~THC1_TEOM);
+			while(f->thc1 & THC1_TEOM);
+		}
+		send_ccs_msg(e1_no, count);
+	}
+}
+
+void ds26518_test(void)
+{
+	
 	FRAMER *f = ds26518_global_framer();
 
-	//uint8_t frameISRStatus = f->gfisr1; //指示哪个FRAME发生中断，每一位表示一个FRAMER（0-7）
-	//uint8_t BERTISRStatus = f->gbisr1; //BERT中断指示，每一位表示一个FRAMER（0-7）
-	//uint8_t LiuISRStatus = f->glisr1; //LIU中断指示
+	if ((card_id & 0xf) != 0)
+		ds26518_global_init();
 
-	//根据前面读取的状态标志确定chl通道号
-	uint8_t chl = 0; // chl 表示具体的通道号，chl = 0 - 7;
+	init_mtp2_mem();
 
-	f = ds26518_framer(chl);
-	uint8_t tls_status = f->tiir; //Transmit Latched Status Register(TLS)1-3
-	if (tls_status & 1){//TLS1 interrupt actived.
-		uint8_t tls1 = f->tls1;
-		if (tls1 & 1){
-			vLog(MONITOR_DEBUG,"Loss of Transmit Clock Condition on %d LINK,Check TCLKn pin!\r\n", chl);
-		}
-		if (tls1 & 2){
-			vLog(MONITOR_DEBUG,"Loss of Transmit Clock Condition Cleard on %d LINK\r\n", chl);
-		}
-		if (tls1 & 4 ){
-			vLog(MONITOR_DEBUG,"Set every 2ms on transmit multiframe boundaries on %d LINK\r\n", chl);
-			//Used to alert the host that signaling data needs to be updated
-			//可以作为2ms的定时器
-		}
-		if (tls1 & 0x20){
-			vLog(MONITOR_DEBUG,"Transmit Elastic Store Slip Occurrence Event on %d LINK\r\n", chl);
-		}
-		if (tls1 & 0x40){
-			vLog(MONITOR_DEBUG,"Transmit Elastic Store Empty Event on %d LINK\r\n", chl);
-		}
-		if (tls1 & 0x80){
-			vLog(MONITOR_ERR,"Transmit Elastic Store FULL Event on %d LINK\r\n", chl);
-		}
-		f->tls1 = tls1;
-	}
-	if (tls_status & 2){ //TLS2
-		//for HDLC64....
-		uint8_t tls2 = f->tls2;
-		if (tls2 & 1){
-			vLog(MONITOR_DEBUG,"Transmit FIFO Not Full Set Condition (TNFS) on %d LINK\r\n", chl);
-		}
-		if (tls2 & 2){
-			vLog(MONITOR_DEBUG,"Transmit FIFO Below Low Watermark Set Condition (TLWMS) on %d LINK\r\n", chl);
-			if (msg_len > 0){ //need to send.
-				uint8_t count = f->tfba;
-				uint8_t i;
-				if (msg_len > count){
-					for(i = 0; i < count; i++){
-						f->thf = msg_buf[i];
-					}
-					msg_len -= count;
-
-					for(i = 0; i < msg_len; i++){
-						msg_buf[i] = msg_buf[i + count];
-					}
-					vLog(MONITOR_WARN, "Already send %d byte, NOT END...\r\n",count);
-				}else{
-					for(i = 0; i < msg_len-1; i++){
-						f->thf = msg_buf[i];
-					}
-					f->thc1 |= THC1_TEOM; // bit2 of thc1 TEOM
-					f->thf = msg_buf[msg_len -1];
-					vLog(MONITOR_WARN, "Already send %d byte,Waite a interrupt end.\r\n",msg_len);
-					msg_len =  0;
-					f->tim2 |= TIM2_TMEND;
-				}
-			}
-		}
-		if (tls2 & 4 ){
-			vLog(MONITOR_DEBUG,"Transmit Message End Event (TMEND) on %d LINK\r\n", chl);
-			f->tim2 &= (~TIM2_TMEND);
-		}
-		if (tls2 & 8 ){
-			vLog(MONITOR_DEBUG,"Transmit FIFO Underrun Event (TUDR) on %d LINK\r\n", chl);
-		}
-		f->tls2 = tls2;
-	}
-	if (tls_status & 4){ //TLS3
-		uint8_t tls3 = f->tls3;
-		if (tls3  & 1){
-			vLog(MONITOR_DEBUG,"Loss Of Frame (LOF) on %d LINK\r\n", chl);
-		}
-		if (tls3 & 2){
-			vLog(MONITOR_DEBUG,"Loss Of Frame Synchronization Detect (LOFD) on %d LINK\r\n", chl);
-		}
-		f->tls3 = tls3;
+	for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+		ds26518_port_init(i, CCS_TYPE);
 	}
 
-	uint8_t rls_status = f->riir; //RLS1,3,4,5,7
-	if (rls_status & 1){ //RLS1
-		uint8_t rls1 = f->rls1;
-		if (rls1 & 1){
-			vLog(MONITOR_DEBUG,"Receive Loss of Frame Condition Detect (RLOFD) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 2){
-			vLog(MONITOR_DEBUG,"Receive Loss of Signal Condition Detect (RLOSD) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 4){
-			vLog(MONITOR_DEBUG,"Receive Alarm Indication Signal Condition Detect (RAISD) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 8){
-			vLog(MONITOR_DEBUG,"Receive Remote Alarm Indication Condition Detect (RRAID) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 0x10){
-			vLog(MONITOR_DEBUG,"Receive Loss of Frame Condition Clear (RLOFC) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 0x20){
-			vLog(MONITOR_DEBUG,"Receive Loss of Signal Condition Clear (RLOSC) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 0x40){
-			vLog(MONITOR_DEBUG,"Receive Alarm Indication Signal Condition Clear (RAISC) on %d LINK\r\n", chl);
-		}
-		if (rls1 & 0x80){
-			vLog(MONITOR_DEBUG,"Receive Remote Alarm Indication Condition Clear (RRAIC) on %d LINK\r\n", chl);
-		}
-		f->rls1 = rls1;
+	if (f->gsrr1 != 0) {
+		goto fault;
 	}
-	if (rls_status & 2){ //RLS2 for E1
-		uint8_t rls2 = f->rls2;
-		if (rls2 & 1){
-			vLog(MONITOR_DEBUG,"Receive Align Frame Event (RAF) every 250us on %d LINK\r\n", chl);
-		}
-		if (rls2 & 2){
-			vLog(MONITOR_DEBUG,"Receive CRC-4 Multiframe Event (RCMF) every 2ms on %d LINK\r\n", chl);
-		}
-		if (rls2 & 4){
-			vLog(MONITOR_DEBUG,"Receive Signaling All Zeros Event (RSA0) on %d LINK\r\n", chl);
-		}
-		if (rls2 & 8){
-			//enabled in CCS mode.the contents of time slot 16 contains fewer than three zeros over 16 consecutive frames
-			vLog(MONITOR_DEBUG,"Receive Signaling All Ones Event (RSA1) on %d LINK\r\n", chl);
-		}
-		if (rls2 & 0x10){
-			vLog(MONITOR_DEBUG,"FAS Resync Criteria Met Event (FASRC) on %d LINK\r\n", chl);
-		}
-		if (rls2 & 0x20){
-			vLog(MONITOR_DEBUG,"CAS Resync Criteria Met Event (CASRC) on %d LINK\r\n", chl);
-		}
-		if (rls2 & 0x40){
-			vLog(MONITOR_DEBUG,"CRC Resync Criteria Met Event (CRCRC) on %d LINK\r\n", chl);
-		}
-		f->rls2 = rls2;
+#if 0
+	if (f->gtcr1 != GTCR1_GIPI) {
+        LOG_W("GTCR1 = 0x%x", f->gtcr1);
+		goto fault;
 	}
-	if (rls_status & 4){ //RLS3 for E1
-		uint8_t rls3 = f->rls3;
-		if (rls3 & 1){
-			vLog(MONITOR_DEBUG,"Receive Distant MF Alarm Detect (RDMAD) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 2){
-			vLog(MONITOR_DEBUG,"V5.2 Link Detect (V52LNKD) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 8){
-			vLog(MONITOR_DEBUG,"Loss of Receive Clock Detect (LORCD) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 0x10){
-			vLog(MONITOR_DEBUG,"Receive Distant MF Alarm Clear (RDMAC) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 0x20){
-			vLog(MONITOR_DEBUG,"V5.2 Link Detected Clear (V52LNKC) on %d LINK\r\n", chl);
-		}
-		if (rls3 & 0x80){
-			vLog(MONITOR_DEBUG,"Loss of Receive Clock CLEAR (LORCC) on %d LINK\r\n", chl);
-		}
-		f->rls3 = rls3;
-	}
-	if (rls_status & 8){ //RLS4
-		uint8_t rls4 = f->rls4;
-		if (rls4 & 1){
-			vLog(MONITOR_DEBUG,"Receive Multiframe Event (RMF) every 2ms on %d LINK\r\n", chl);
-		}
-		if (rls4 & 2){
-			vLog(MONITOR_DEBUG,"Timer Event (TIMER) Set on increments of 1 second or 62.5ms based on RCLKn on %d LINK\r\n", chl);
-		}
-		if (rls4 & 4){
-			vLog(MONITOR_DEBUG,"One-Second Timer (1SEC) on %d LINK\r\n", chl);
-		}
-		if (rls4 & 8){
-			//Signaling Change of State Interrupt Enable registers (RSCSE1 through RSCSE3) changes signaling state.
-			vLog(MONITOR_DEBUG,"Receive Signaling Change of State Event (RSCOS) on %d LINK\r\n", chl);
-		}
-		if (rls4 & 0x20){
-			vLog(MONITOR_DEBUG,"Receive Elastic Store Slip Occurrence Event (RSLIP) on %d LINK\r\n", chl);
-		}
-		if (rls4 & 0x40){
-			vLog(MONITOR_DEBUG,"Receive Elastic Store Empty Event (RESEM) on %d LINK\r\n", chl);
-		}
-		if (rls4 & 0x80){
-			vLog(MONITOR_ERR,"Receive Elastic Store Full Event (RESF) on %d LINK\r\n", chl);
-		}
-		f->rls4 = rls4;
-	}
-
-	if (rls_status & 0x10){ //RLS5
-		//For HDLC-64 status
-		uint8_t rls5 = f->rls5;
-		if (rls5 & 1){
-			vLog(MONITOR_DEBUG,"Receive FIFO Not Empty Set Event (RNES) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 2){
-			vLog(MONITOR_DEBUG,"Receive FIFO Above High Watermark Set Event (RHWMS) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 4){
-			vLog(MONITOR_DEBUG,"Receive Packet Start Event (RPS) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 8){
-			//Signaling Change of State Interrupt Enable registers (RSCSE1 through RSCSE3) changes signaling state.
-			vLog(MONITOR_DEBUG,"Receive Packet End Event (RPE) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 0x10){
-			vLog(MONITOR_DEBUG,"Receive HDLC-64 Opening Byte Event (RHOBT) on %d LINK\r\n", chl);
-		}
-		if (rls5 & 0x20){
-			vLog(MONITOR_DEBUG,"Receive FIFO Overrun (ROVR) on %d LINK\r\n", chl);
-		}
-		f->rls5 = rls5;
-	}
-	if (rls_status & 0x40){ //RLS7
-		//Not used...
-	}
-
-	liu = ds26518_liu(chl);
-
-	uint8_t llsr = liu->llsr; /* Bit6: Open-Circuit Clear (OCC). This latched bit is set when an open circuit condition was detected at TTIPn and TRINGn and then removed
-						Bit5: Short-Circuit Clear (SCC). This latched bit is set when a short circuit condition was detected at TTIPn and TRINGn and then removed
-						Bit4: Loss of Signal Clear (LOSC). This latched bit is set when a loss of signal condition was detected at RTIPn and RRINGn and then removed.
-						Bit 2: Open-Circuit Detect (OCD). This latched bit is set when open-circuit condition is detected at TTIPn and TRINGn
-						Bit 1: Short-Circuit Detect (SCD). This latched bit is set when short-circuit condition is detected at TTIPn and TRINGn
-						Bit 0: Loss of Signal Detect (LOSD). This latched bit is set when an LOS condition is detected at RTIPn and RRINGn  */
-	if (llsr & 1){
-		vLog(MONITOR_ERR,"Loss of Signal Detect (LOSD) on %d LINK\r\n", chl);
-	}
-	if (llsr & 2){
-		vLog(MONITOR_ERR,"Short-Circuit Detect (SCD) on %d LINK\r\n", chl);
-	}
-	if (llsr & 4){
-		vLog(MONITOR_ERR,"Open-Circuit Detect (OCD) on %d LINK\r\n", chl);
-	}
-	if (llsr & 0x10){
-		vLog(MONITOR_DEBUG,"Loss of Signal Clear (LOSC) on %d LINK\r\n", chl);
-	}
-	if (llsr & 0x20){
-		vLog(MONITOR_DEBUG,"Short-Circuit Clear (SCC) on %d LINK\r\n", chl);
-	}
-	if (llsr & 0x40){
-		vLog(MONITOR_DEBUG,"Open-Circuit Clear (OCC) on %d LINK\r\n", chl);
-	}
-
-	liu->llsr = llsr;
-	//uint8_t bsr = (BERT *)(&dev->bert[chl])->bsr; //误码检测相关设置，暂时不用
-
-}
 #endif
+	if (f->gfcr1 != GFCR1_BPCLK(3)) {
+        LOG_W("GFCR1 = 0x%x", f->gfcr1);
+		goto fault;
+	}
+
+	if (f->gtcr3 != 0) {
+        LOG_W("GTCR3 = 0x%x", f->gtcr3);
+		goto fault;
+	}
+
+	if (f->gtccr3 != 0) {
+        LOG_W("GTCCR3 = 0x%x", f->gtccr3);
+		goto fault;
+	}
+    
+    if ((card_id & 0xf) > 0) {
+        if ((f->gtccr1 >> 4) != REFCLKIO) {
+            LOG_W("GTCCR1 = 0x%x", f->gtccr1);
+            goto fault;
+        }
+    } else {
+        if ((f->gtccr1 >> 4) != MCLK) {
+            LOG_W("GTCCR1 = 0x%x", f->gtccr1);
+            goto fault;
+        }
+    }
+
+	LOG_I("DS26518 TEST OK!");
+	return;
+
+fault:
+	LOG_E("DS26518 TEST FAILED!");
+}
+
+void ds26518_monitor_tx_slot(int e1_no, int slot)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	f->tds0sel = slot & 0x1f;
+}
+
+void ds26518_monitor_rx_slot(int e1_no, int slot)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	f->rdsosel = slot & 0x1f;
+}
+
+u8_t ds26518_read_monitor_tx_slot(int e1_no)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	return f->tdsom;
+}
+
+u8_t ds26518_read_monitor_rx_slot(int e1_no)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	return f->rdsom;
+}
 
 #if 0
-/*
- * direction = 0 : 出方向设置IDLE Code transmit
- * 			 = 1 :   入方向设置IDLE Code  receive
- * e1_no  = 0-7
- * slot = 0-31
- */
-void insert_idle_slot(int direction, uint8_t e1_no, uint8_t slot)
+void ds26518_mon_test2(int e1_no, int slot)
 {
-	volatile uint8_t *pEnable, *pData;
+    FRAMER *f = ds26518_framer(e1_no);
+	HAL_Delay(1);
+	ds26518_monitor_tx_slot(e1_no, slot);
+    ds26518_monitor_rx_slot(e1_no, slot);
 
-	f = (FRAMER *)(&dev->te1[e1_no]);
-	if(direction == 0){ //设置出方向时隙为IDLE Code
-		pEnable = f->tcice;
-		pData = f->tidr;
-	}else{
-		pEnable = f->rcice;
-		pData = f->ridr;
-	}
-
-	*(pEnable  + (slot << 3)) |=  1 << (slot & 7);
-
-	*(pData + slot) = 0x55; //IDLE Code for uLaw.
-}
-
-void insert_normal_slot(int direction, uint8_t e1_no, uint8_t slot)
-{
-
-	volatile uint8_t  *pEnable;
-
-	f = (FRAMER *)(&dev->te1[e1_no]);
-	if(direction == 0){ //设置出方向时隙为IDLE Code
-		pEnable = f->tcice;
-	}else{
-		pEnable = f->rcice;
-	}
-
-	*(pEnable  + (slot << 3)) &=  ~(1 << (slot & 7));
+	LOG_I("Now in monitor test2, print E1 '%d' slot '%d' tx, rx data", e1_no, slot);
+    print_zl50020_cml_value(0, slot);
+    for(int i = 0; i < 10; i++){
+        LOG_D("tx_data = %x, rx_data = %x", f->tdsom, f->rdsom);
+    }
+    
+	read_zl50020_data_mem(0, slot);
 }
 #endif
+
+void ds26518_display_rx_data(int e1_no, int slot)
+{
+    FRAMER *f = ds26518_framer(e1_no);
+    //u8_t tx_data[300] = {0};
+    u8_t rx_data[300] = {0};
+    u8_t dummy;
+
+    LOG_I("Now print '%d' e1 '%d' slot rx memory!", e1_no, slot);
+    
+    for(int i = 0; i < 300; i++) {
+        //tx_data[i] = f->tdsom;
+        rx_data[i] = f->rdsom;
+        for (int j = 0; j < 20*16; j++) {
+            dummy = f->tdsom;
+            if (dummy != 0x86) {
+                continue;
+            }
+        }
+    }
+    //LOG_HEX("tx-data", 16, tx_data, 300);
+    LOG_HEX("rx-data", 16, rx_data, 300);
+}
+void ds26518_monitor_test(int e1_no, int slot)
+{
+	u8_t test_value ;
+    FRAMER *f = ds26518_framer(e1_no);
+    ds26518_port_init(e1_no, CCS_TYPE);
+    ds26518_monitor_tx_slot(e1_no, slot);
+    ds26518_monitor_rx_slot(e1_no, slot);
+	ds26518_e1_slot_enable(e1_no,slot,VOICE_ACTIVE);
+    
+    set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
+    HAL_Delay(10);
+    
+    LOG_I("Now loopback, read some data ");
+    ds26518_display_rx_data(e1_no, slot);
+    
+	if (slot == 0) {
+		test_value = 0x9b;
+	}else {
+		test_value = 0x7f;
+	}
+	read_zl50020_data_mem(e1_no, slot, test_value);
+    
+    set_ds26518_loopback(e1_no, NO_LP);
+}
+
+#if 0
+void ds26518_zl50020_test(int e1_no, int slot_in, int slot_out)
+{
+   
+    FRAMER *f = ds26518_framer(e1_no);
+    ds26518_port_init(e1_no, CCS_TYPE);
+    ds26518_monitor_tx_slot(e1_no, slot_in);
+    ds26518_monitor_rx_slot(e1_no, slot_in);
+    
+    set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
+    
+    ds26518_e1_slot_enable(e1_no,slot_in,VOICE_ACTIVE); //tx, rx
+    
+    HAL_Delay(10);
+    LOG_I("Now print '%d' e1 '%d' slot rx memory!", e1_no, slot_in);
+    ds26518_display_rx_data(e1_no, slot_in);
+    
+    HAL_Delay(10);
+    read_zl50020_data_mem(e1_no, slot_in);
+    
+    connect_slot(slot_in,e1_no, slot_out, e1_no);
+    HAL_Delay(10);
+    ds26518_display_rx_data(e1_no, slot_in);
+    read_zl50020_data_mem(e1_no, slot_in);
+}
+#endif
+
+void ds26518_BERT_error_insert_rate(int e1_no, int err_rate)
+{
+	BERT *bert = ds26518_bert(e1_no);
+
+	/* 0: No errors automatically inserted 
+	*  1: 10E-1
+	*  2: 10E-2
+	*  3: 10E-3
+	*  4-7: 10E-4 ~~ 10E-7
+	*/
+	bert->bc2 = BC2_EIB(err_rate & 7);
+}
+
+void ds26518_enable_bert(int e1_no, int pattern)
+{
+	FRAMER *f = ds26518_framer(e1_no);
+	BERT *bert = ds26518_bert(e1_no);
+
+    e1_port_init(e1_no);
+	/* System (backplane) operation. Rx BERT port receives data from the transmit path. The transmit path enters the receive BERT on the line side of the elastic store (if enabled). */
+	f->rxpc = RXPC_RBPEN | RXPC_RPPDIR; 
+
+	/* System (backplane) operation. Transmit BERT port sources data into the receive path (RSERn). In this mode, the data from the BERT is muxed into the receive path. */
+	f->txpc = TXPC_TBPEN | TXPC_TBPDIR;
+
+	f->rbpcs[0] = 0x2; // enable slot 1 (from 0 index);
+	f->tbpcs[0] = 0x2; // enable slot 1
+    
+    connect_bert_slot(e1_no, 1);
+
+	ds26518_BERT_error_insert_rate(e1_no, 0);
+	/* 0: Pseudorandom 2E7–1
+	*  1: Pseudorandom 2E11–1
+	*  2: Pseudorandom 2E15–1
+	*  3: Pseudorandom Pattern QRSS. A 2 20- 1 pattern with 14 consecutive zero restriction
+	*  4: Repetitive Pattern
+	*  5: Alternating Word Pattern
+	*  6: Modified 55 Octet (Daly) Pattern
+	*  7: Pseudorandom 2E-9-1
+	*/
+	bert->bc1 = BC1_PS(pattern & 7);
+
+	if (pattern == 4) {
+		bert->brp[0] = 0xad;
+		bert->brp[1] = 0xb5;
+		bert->brp[2] = 0xd6;
+		bert->brp[3] = 0x5a;
+	} else {
+		memset((void *)(bert->brp), 0xff, 4);
+	}
+
+	/* start tc */
+    HAL_Delay(1);
+	bert->bc1 |= (BC1_TC | BC1_LC);
+}
+
+void ds26518_bert_report(int e1_no)
+{
+    EXTBERT *ebert = ds26518_exbert(e1_no);
+	BERT *bert = ds26518_bert(e1_no);
+    
+    LOG_W("BERT Status Register = %X, Real Status = %X", bert->bsr, ebert->brsr);
+    LOG_W("BERT Latched Status = %X/%X", ebert->blsr1, ebert->blsr2);
+    LOG_W("BERT Bit Counter = %d", (u32_t)bert->bbc[0] | (u32_t)bert->bbc[1] << 8 | (u32_t)bert->bbc[2] << 16 | (u32_t)bert->bbc[3] << 24);
+    LOG_W("BERT Bit Error = %d", (u32_t)bert->bec[0] | (u32_t)bert->bec[1] << 8 | (u32_t)bert->bec[2] << 16);
+}
+
+void ds26518_bert_test(int e1_no, int slot, int system_direction)
+{
+	FRAMER *f = ds26518_framer(e1_no & 7);
+    BERT *bert = ds26518_bert(e1_no & 7);
+    EXTBERT *ebert = ds26518_exbert(e1_no & 7);
+
+	f->txpc = TXPC_TBPEN | (system_direction == 1 ? TXPC_TBPDIR : 0);
+	f->rxpc = RXPC_RBPEN | (system_direction == 1 ? RXPC_RPPDIR : 0);
+
+	int index = (slot & 0x1f) >> 3;
+	int bit = (slot & 7);
+
+	memset((void *)f->tbpcs, 0, 4);
+	f->tbpcs[index] = 1 << bit;
+
+	memset((void *)f->rbpcs, 0, 4);
+	f->rbpcs[index] = 1 << bit;
+
+	/* Alternating Word Pattern  = 5*/
+	bert->bc1 = BC1_PS(5);
+	bert->brp[0] = bert->brp[1] = 0;
+	bert->brp[2] = bert->brp[3] = 0x7e;
+	bert->bawc = 100;
+
+	/* Connect slot */
+	if (system_direction == 1) {
+		connect_slot(slot, e1_no, slot, e1_no);
+	} else {
+		set_ds26518_loopback(e1_no, FRAME_LOCAL_LP);
+	}
+	
+	/*Load pattern */
+	bert->bc1 |= (BC1_TC | BC1_LC);
+
+	HAL_Delay(2);
+
+	bert->bc1 &= ~(BC1_LC);
+	bert->bc1 |= BC1_LC;
+
+	HAL_Delay(2);
+
+	u32_t bit_counts = ((u32_t)bert->bbc[3] << 24) | ((u32_t)bert->bbc[2] << 16) | ((u32_t)bert->bbc[1] << 8) | bert->bbc[0];
+	u32_t bit_err_counts = ((u32_t)bert->bec[2] << 16) | ((u32_t)bert->bec[1] << 8) | bert->bec[0];
+
+	u8_t real_status = ebert->brsr;
+	u8_t latch_status1 = ebert->blsr1;
+	u8_t latch_status2 = ebert->blsr2;
+
+	ebert->blsr1 = latch_status1;
+	ebert->blsr2 = latch_status2;
+
+	LOG_I("--------------E1 %d Slot %d BERT TEST RESULT-----------------", e1_no, slot);
+	LOG_I("Bit counts\tBit ERROR counts");
+	LOG_I("%d\t%d", bit_counts, bit_err_counts);
+	LOG_I("Real_status\tla status1\tla status2");
+	LOG_I("%02x\t%02x\t%02x", real_status, latch_status1, latch_status2);
+	LOG_I("---------------END REPROT-------------------------------------");
+}
+
+char *frame_status(u8_t status)
+{
+	if (status & RRTS7_CRC4SA) {
+		return "CRC4 Multiframer";
+	} else if (status & RRTS7_CASSA) {
+		return "CAS Multiframer";
+	} else if (status & RRTS7_FASSA) {
+		return "Framer";
+	} else {
+		return "NOT Aligned!";
+	}
+}
+
+void ds26518_frame_status(int e1_no)
+{
+    FRAMER *f = ds26518_framer(e1_no);
+
+    LOG_I("DS2658 e1 '%d' frame status = %x:'%s'", e1_no,f->rfdl_rrts7, frame_status(f->rfdl_rrts7));
+
+
+	//out_tx_abcd(0, 17, 7);
+	//HAL_Delay(2);
+
+
+	u8_t read_abcd[16];
+	for (int i = 0; i < 16; i++) {
+		read_abcd[i] = f->rs[i];
+	}
+	LOG_HEX("rx-abcd", 16, read_abcd, 16);
+
+#if 0
+	ds26518_monitor_tx_slot(e1_no, 16);
+    ds26518_monitor_rx_slot(e1_no, 16);
+
+    LOG_I("Now print E1 '%d' slot '%d' tx, rx data", e1_no, 16);
+    
+    for(int i = 0; i < 20; i++){
+        LOG_D("tx_data = %x, rx_data = %x", f->tdsom, f->rdsom);
+    }
+#endif
+}
 

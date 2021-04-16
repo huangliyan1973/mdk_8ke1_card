@@ -59,8 +59,13 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define ODE_Pin GPIO_PIN_0
+#define ODE_GPIO_Port GPIOC
 #define DS26518_INT_Pin GPIO_PIN_5
 #define DS26518_INT_GPIO_Port GPIOA
+#define DS26518_INT_EXTI_IRQn EXTI9_5_IRQn
+#define ETH_EN_Pin GPIO_PIN_3
+#define ETH_EN_GPIO_Port GPIOD
 #define CLOCK_EN_Pin GPIO_PIN_7
 #define CLOCK_EN_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */

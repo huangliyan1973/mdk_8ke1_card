@@ -1,8 +1,8 @@
 /**
   ******************************************************************************
-  * @file    usart.h
+  * @file    i2c.h
   * @brief   This file contains all the function prototypes for
-  *          the usart.c file
+  *          the i2c.c file
   ******************************************************************************
   * @attention
   *
@@ -17,8 +17,8 @@
   ******************************************************************************
   */
 /* Define to prevent recursive inclusion -------------------------------------*/
-#ifndef __USART_H__
-#define __USART_H__
+#ifndef __I2C_H__
+#define __I2C_H__
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,16 +31,15 @@ extern "C" {
 
 /* USER CODE END Includes */
 
-extern UART_HandleTypeDef huart1;
+extern I2C_HandleTypeDef hi2c1;
 
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */
 
-void MX_USART1_UART_Init(void);
+void MX_I2C1_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-int ulog_console_backend_init(void);
 
 /* USER CODE END Prototypes */
 
@@ -48,6 +47,6 @@ int ulog_console_backend_init(void);
 }
 #endif
 
-#endif /* __USART_H__ */
+#endif /* __I2C_H__ */
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

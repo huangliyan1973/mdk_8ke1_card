@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
+  * <h2><center>&copy; Copyright (c) 2021 STMicroelectronics.
   * All rights reserved.</center></h2>
   *
   * This software component is licensed by ST under Ultimate Liberty license
@@ -26,17 +26,41 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "ds26518.h"
+#include "zl50020.h"
+#include "sram.h"
+#include "eeprom.h"
+#include "sched.h"
+#include "mtp.h"
 #include "server_interface.h"
+#include "shell_port.h"
+
+#define LOG_TAG              "thread"
+#define LOG_LVL              LOG_LVL_DBG
+#include "ulog.h"
+
+#define BERT_TEST
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+//static u32_t last_update_eeprom;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-extern void snmp_8ke1_init(void);
+void print_task(void)
+{
+    char buf[512] = {0};
+    
+    LOG_I("freeHeapsize = %d, miniHeapsize=%d",xPortGetFreeHeapSize(), xPortGetMinimumEverFreeHeapSize());
+
+    vTaskList(buf);
+    printf("Name\t\tState\tPri\tStack\tNum\n");
+    printf("\n%s\n",buf);
+}
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -52,8 +76,8 @@ extern void snmp_8ke1_init(void);
 osThreadId_t defaultTaskHandle;
 const osThreadAttr_t defaultTask_attributes = {
   .name = "defaultTask",
-  .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 128 * 4
+  .priority = (osPriority_t) osPriorityBelowNormal6,
+  .stack_size = 256 * 4
 };
 
 /* Private function prototypes -----------------------------------------------*/
@@ -97,7 +121,7 @@ void MX_FREERTOS_Init(void) {
   defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
+  
   /* USER CODE END RTOS_THREADS */
 
   /* USER CODE BEGIN RTOS_EVENTS */
@@ -118,12 +142,56 @@ void StartDefaultTask(void *argument)
   /* init code for LWIP */
   MX_LWIP_Init();
   /* USER CODE BEGIN StartDefaultTask */
-  snmp_8ke1_init();
-  server_interface_init();
+    
+  shell_init();
+    
+  mtp_init();
   
-  for(;;)
+  sched_timeout_init();
+
+  server_interface_init();
+
+  snmp_8ke1_init();
+
+  //last_update_eeprom = HAL_GetTick();
+#ifdef BERT_TEST
+  //enable_prbs_function(5);
+  //ds26518_enable_bert(2,1);
+  //HAL_Delay(500);
+  //ds26518_bert_report(2);
+  //send_msg(0,1,0x75);
+  //zl50020_clkout_test();
+  //set_ds26518_loopback(1, FRAME_LOCAL_LP);
+  
+  //ds26518_monitor_test(0, 2);
+  //connect_slot(1,0,1,0);
+  //connect_slot(2,0,2,0);
+  //connect_slot(1,8, 1, 0);
+  //print_zl50020();
+  //test_prbs();
+#endif
+  for (;;)
   {
-    osDelay(1);
+    //LOG_W("LIU 0 status = %x",check_liu_status(0));
+    //print_zl50020(0,0);
+    //print_task();
+#ifdef BERT_TEST
+    //print_prbs_value(5, 0);
+    //ds26518_bert_report(2);
+#endif
+//    for(int i = 0; i < 8; i++){
+//        check_liu_status(i);
+//    }
+    
+    //check_memory();
+      
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    /* need update eeprom */
+//    if ((HAL_GetTick() - last_update_eeprom) > 5000) {
+       update_eeprom();
+       //last_update_eeprom = HAL_GetTick();
+//    }
+
   }
   /* USER CODE END StartDefaultTask */
 }

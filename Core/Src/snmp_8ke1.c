@@ -1,10 +1,8 @@
 #include <string.h>
-#include "FreeRTOS.h"
-#include "task.h"
 #include "main.h"
 #include "cmsis_os.h"
+#include "FreeRTOS.h"
 
-#include "card_debug.h"
 #include "lwip/apps/snmp.h"
 #include "lwip/opt.h"
 #include "lwip/api.h"
@@ -16,7 +14,16 @@
 
 #include "usart.h"
 #include "eeprom.h"
+#include "ds26518.h"
+#include "mtp.h"
 #include "server_interface.h"
+#include "zl50020.h"
+
+#define LOG_TAG              "snmp"
+#define LOG_LVL              LOG_LVL_DBG
+#include "ulog.h"
+
+extern osThreadId_t defaultTaskHandle;
 
 extern ip4_addr_t local_addr;
 
@@ -29,7 +36,19 @@ static const u8_t   e1_oid_len = (u8_t)LWIP_ARRAYSIZE(e1_oid_base);
 static const struct snmp_obj_id  snmp_8ke1_enterprise_oid_default = {SNMP_8KE1_ENTERPRISE_OID_LEN, SNMP_8KE1_ENTERPRISE_OID};
 static const struct snmp_obj_id *snmp_8ke1_enterprise_oid         = &snmp_8ke1_enterprise_oid_default;
 
+
+#define SNMP_8KE1_MTP2_OID_LEN    14
+#define SNMP_8KE1_MTP2_OID    {1, 3, 6, 1, 4, 1, 1373, 1, 3, 1, 1, 3, 4, 0}
+
+static const struct snmp_obj_id  snmp_8ke1_mtp2_oid_default = {SNMP_8KE1_MTP2_OID_LEN, SNMP_8KE1_MTP2_OID};
+static const struct snmp_obj_id *snmp_8ke1_mtp2_oid         = &snmp_8ke1_mtp2_oid_default;
+
+
 static const char *snmp_community = "public";
+
+extern card_heart_t  hb_msg;
+static struct snmp_varbind  trap_var;
+static struct snmp_varbind  mtp2_trap_var;
 
 struct snmp_msg_trap { 
   /* source IP address, raw network order format */
@@ -52,7 +71,6 @@ struct snmp_msg_trap {
   u16_t vbseqlen;
 };
 
-static void setup_trap_msg(void);
 static u16_t snmp_trap_varbind_sum(struct snmp_msg_trap *trap, struct snmp_varbind *varbinds);
 static u16_t snmp_trap_header_sum(struct snmp_msg_trap *trap, u16_t vb_len);
 static err_t snmp_trap_header_enc(struct snmp_msg_trap *trap, struct snmp_pbuf_stream *pbuf_stream);
@@ -314,13 +332,30 @@ static err_t snmp_prepare_outbound_frame(struct snmp_request *request)
     return ERR_OK;
 }
 
+static void print_oid_value(struct snmp_varbind *vb)
+{
+    char oid[200] = {0};
+    u8_t offset = 0;
+
+    LOG_I("Now got oid len = %d, check it now!", vb->oid.len);
+    for (int i = 0; i < vb->oid.len; i++)
+    {
+        offset += sprintf(&oid[offset], "%d.", vb->oid.id[i]);        
+    }
+    LOG_I("OID = %s", oid);
+}
+
 static snmp_err_t snmp_oid_check(struct snmp_varbind *vb)
 {
+    print_oid_value(vb);
+
     if (((int)(vb->oid.len) - (int)e1_oid_len) < 3) {
+        LOG_E("Error in oid len");
         return SNMP_ERR_NOSUCHINSTANCE;
     }
     
     if (snmp_oid_compare(vb->oid.id, e1_oid_len, e1_oid_base, e1_oid_len) != 0) {
+        LOG_E("Error oid different with E1 oid");
         return SNMP_ERR_NOSUCHINSTANCE;
     }
     
@@ -332,8 +367,7 @@ static snmp_err_t snmp_get_value(struct snmp_varbind *vb)
 {
     u32_t instance;
     u32_t sub_oid;
-    u32_t *oid;
-        
+    
     snmp_err_t  err = snmp_oid_check(vb);
     if (err != SNMP_ERR_NOERROR) {
         return err;
@@ -341,40 +375,33 @@ static snmp_err_t snmp_get_value(struct snmp_varbind *vb)
     
     sub_oid = vb->oid.id[e1_oid_len + 1];
     instance = vb->oid.id[e1_oid_len + 2];
-#if 0   
-    oid = vb->oid.id;
-    u16_t oid_len;
-    CARD_DEBUGF(NET_DEBUG, ("e1_oid_len = %"U16_F"    vb Oid is:\n", e1_oid_len));
-    for (oid_len = 0; oid_len < vb->oid.len; oid_len++) {
-        CARD_DEBUGF(NET_DEBUG, ("%"U32_F".", *oid++));
-    }
-#endif
-    oid = vb->oid.id + e1_oid_len + 2;
-    CARD_DEBUGF(NET_DEBUG, ("\nSnmp Get sub_oid=%"U16_F"\tinstance=%"U16_F"\toid_instance=%"U16_F"\n", sub_oid, instance, *oid));
+
+    //oid = vb->oid.id + e1_oid_len + 2;
+    LOG_I("Snmp Get sub_oid=%d, instance=%d\n", sub_oid, instance);
     
     vb->type = SNMP_ASN1_TYPE_OCTET_STRING;
     
     switch (vb->oid.id[e1_oid_len]) {
         case 2:  /* Config */
             if (sub_oid <= 13 && sub_oid != 7) {
-                if (instance == card_id) {
+                if (instance < E1_CARDS) {
                     vb->value_len = 1;
                     if (sub_oid == 1) {
-                        *(u8_t *)(vb->value) = e1_params.e1_enable[card_id];
+                        *(u8_t *)(vb->value) = e1_params.e1_enable[instance];
                     } else if (sub_oid == 2) {
-                        *(u8_t *)(vb->value) = e1_params.e1_l2_alarm_enable[card_id];
+                        *(u8_t *)(vb->value) = e1_params.e1_l2_alarm_enable[instance];
                     } else if (sub_oid == 3) {
-                        *(u8_t *)(vb->value) = e1_params.e1_port_type[card_id];
+                        *(u8_t *)(vb->value) = e1_params.e1_port_type[instance];
                     } else if (sub_oid == 4) {
-                        *(u8_t *)(vb->value) = e1_params.isdn_port_type[card_id];
+                        *(u8_t *)(vb->value) = e1_params.isdn_port_type[instance];
                     } else if (sub_oid == 5) {
-                        *(u8_t *)(vb->value) = e1_params.pll_src[card_id];
+                        *(u8_t *)(vb->value) = e1_params.pll_src[instance];
                     } else if (sub_oid == 6) {
-                        *(u8_t *)(vb->value) = e1_params.crc4_enable[card_id];
+                        *(u8_t *)(vb->value) = e1_params.crc4_enable[instance];
                     } else if (sub_oid == 13) {
-                        *(u8_t *)(vb->value) = e1_params.no1_enable[card_id];
+                        *(u8_t *)(vb->value) = e1_params.no1_enable[instance];
                     } else if (sub_oid == 8) {
-                        *(u8_t *)(vb->value) = e1_params.mtp2_error_check[card_id];
+                        *(u8_t *)(vb->value) = e1_params.mtp2_error_check[instance];
                     } else {
                         return SNMP_ERR_NOSUCHINSTANCE;
                     }
@@ -414,10 +441,35 @@ static snmp_err_t snmp_get_value(struct snmp_varbind *vb)
     return SNMP_ERR_NOERROR;
 }
 
+void restart_system(void)
+{
+    __set_FAULTMASK(1); // 关闭所有中断
+    NVIC_SystemReset(); // 复位
+}
+
+static void softreset(void)
+{
+    if (ram_params.init_flag == 0xA5) {
+        HAL_Delay(10);
+        //load_default_param();
+        e1_params.iap_value = 0xaa;
+        update_eeprom();
+        reload_eeprom();
+        LOG_W("iap value = %x", e1_params.iap_value);
+        HAL_Delay(10);
+        restart_system();
+    } else if (ram_params.init_flag == 0x5A) {
+        HAL_Delay(10);
+        restart_system();
+    }
+}
+
 static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
 {
     u8_t instance, value;
+    u8_t old_value, mask;
     u32_t sub_oid;
+    u8_t e1_no;
     
     snmp_err_t  err = snmp_oid_check(vb);
     if (err != SNMP_ERR_NOERROR) {
@@ -425,29 +477,84 @@ static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
     }
     
     sub_oid = vb->oid.id[e1_oid_len + 1];
-    instance = *(u8_t *)(vb->oid.id[e1_oid_len + 2]) & 0xf;
+    instance = vb->oid.id[e1_oid_len + 2];
     value = *(u8_t *)(vb->value);
-    
+
+    LOG_I("Snmp set sub_oid=%d, instance=%d, value=%x\n", sub_oid, instance, value);
+  
     switch (vb->oid.id[e1_oid_len]) {
         case 2: /*config */
             if (sub_oid <= 13 && sub_oid != 7) {
-                if (instance == card_id) {
+                if (instance < E1_CARDS) {
                     if (sub_oid == 1) {
-                        e1_params.e1_enable[card_id] = value ;
+                        old_value = e1_params.e1_enable[instance & 0xf];
+                        e1_params.e1_enable[instance & 0xf] = value;
+
+                        if (value != old_value && instance == card_id) {
+                            for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+                                mask = 1 << i;
+                                if (!(old_value & mask) && (value & mask)) {
+                                    e1_port_init(i);
+                                }
+                            }
+                        }
+                        
                     } else if (sub_oid == 2) {
-                        e1_params.e1_l2_alarm_enable[card_id] = value ;
+                        e1_params.e1_l2_alarm_enable[instance & 0xf] = value ;
                     } else if (sub_oid == 3) {
-                        e1_params.e1_port_type[card_id] = value ;
+                        old_value = e1_params.e1_port_type[instance & 0xf];
+                        e1_params.e1_port_type[instance & 0xf] = value ;
+
+                        if(value != old_value && instance == card_id) {
+                            for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+                                mask = 1 << i;
+                                if ((old_value & mask) != (value & mask)) {
+                                    e1_port_init(i);
+                                }
+                            }
+                        }
+                        
                     } else if (sub_oid == 4) {
-                        e1_params.isdn_port_type[card_id] = value ;
+                        old_value = e1_params.isdn_port_type[instance & 0xf];
+                        e1_params.isdn_port_type[instance & 0xf] = value ;
+
+                        if(value != old_value && instance == card_id) {
+                            for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+                                mask = 1 << i;
+                                if ((old_value & mask) != (value & mask)) {
+                                    e1_port_init(i);
+                                }
+                            }
+                        }
                     } else if (sub_oid == 5) {
-                        e1_params.pll_src[card_id] = value ;
+                        old_value = e1_params.pll_src[instance & 0xf];
+                        e1_params.pll_src[instance & 0xf] = value ;
+                        if (old_value != value && instance == card_id) {
+                            if ((card_id & 0xf) == 0) {
+                                if (value <= E1_PORT_PER_CARD) {
+                                    set_ds26518_master_clock((enum BACKPLANE_REFERENCE)value);
+                                } 
+                            }
+                        }
+
                     } else if (sub_oid == 6) {
-                        e1_params.crc4_enable[card_id] = value ;
-                    } else if (sub_oid == 13) {
-                        e1_params.no1_enable[card_id] = value ;
+
+                        e1_params.crc4_enable[instance & 0xf] = value ;
+
+                    } else if (sub_oid == 13) { 
+                        old_value = e1_params.no1_enable[instance & 0xf];                      
+                        e1_params.no1_enable[instance & 0xf] = value ;
+
+                        if (instance == card_id && old_value != value) {
+                            for(int i = 0; i < E1_PORT_PER_CARD; i++) {
+                                mask = 1 << i;
+                                if ((old_value & mask) != (value & mask)) {
+                                    e1_port_init(i);
+                                }
+                            }
+                        }
                     } else if (sub_oid == 8) {
-                        e1_params.mtp2_error_check[card_id] = value ;
+                        e1_params.mtp2_error_check[instance & 0xf] = value ;
                     } else {
                         return SNMP_ERR_NOSUCHINSTANCE;
                     } 
@@ -455,24 +562,30 @@ static snmp_err_t snmp_set_value(struct snmp_varbind *vb)
                     return SNMP_ERR_NOSUCHINSTANCE;
                 }
             } else if (sub_oid == 7) {
-                if (instance < LWIP_ARRAYSIZE(tone_par_map)) {
+                if ((instance & 0xf) < LWIP_ARRAYSIZE(tone_par_map)) {
                     memcpy (tone_par_map[instance].value, vb->value, vb->value_len);
                 } else {
                     return SNMP_ERR_NOSUCHINSTANCE;
                 }
             } else if (sub_oid == 16) {  
-                if (instance == 1) { /* 16.1 */
-                    uint8_t e1_no = (uint8_t)vb->oid.id[e1_oid_len + 3] & 0x7;
+                if ((instance & 0xf) == 1) { /* 16.1 */
+                    e1_no = (u8_t)vb->oid.id[e1_oid_len + 3] & 0x7;
                     memcpy ((void *)(&e1_params.pc_magic[e1_no].type), vb->value, vb->value_len);
                 } else {
                     return SNMP_ERR_NOSUCHINSTANCE;
                 }
             }
+            
+            if ((sub_oid == 16 && e1_no == 7) || 
+                (sub_oid == 7) || 
+                (instance & 0xf) == 0xf) {
+                xTaskNotifyGive(defaultTaskHandle);
+            }
             break;
         case 3: /*command */
             if (sub_oid == 1) {
                 ram_params.init_flag = value;
-                /* Todo: 重启或EEPROM初始化 */
+                //softreset();
             } else {
                 return SNMP_ERR_NOSUCHINSTANCE;
             }
@@ -504,8 +617,6 @@ static err_t snmp_process_get_request(struct snmp_request *request)
     snmp_vb_enumerator_err_t err;
     struct snmp_varbind vb;
     vb.value = request->value_buffer;
-    
-    LWIP_DEBUGF(SNMP_DEBUG, ("SNMP get request\n"));
     
     while (request->error_status == SNMP_ERR_NOERROR) {
         err = snmp_vb_enumerator_get_next(&request->inbound_varbind_enumerator, &vb);
@@ -647,12 +758,16 @@ static err_t snmp_process_set_request(struct snmp_request *request)
 
 static void snmp_process_trap_request(struct snmp_request *request)
 {
+    static u32_t last_rev_sn_ht_time = 0;
+    u32_t now;
+    ip4_addr_t *sn = (plat_no == 0 ? &sn0 : &sn1);
+
     snmp_vb_enumerator_err_t err;
     struct snmp_varbind vb;
     vb.value = request->value_buffer;
-    
-    LWIP_DEBUGF(SNMP_DEBUG, ("SNMP trap request\n"));
-    
+
+    now = HAL_GetTick();
+
     if (request->error_status == SNMP_ERR_NOERROR) {
         err = snmp_vb_enumerator_get_next(&request->inbound_varbind_enumerator, &vb);
         if (err == SNMP_VB_ENUMERATOR_ERR_OK) {
@@ -660,10 +775,19 @@ static void snmp_process_trap_request(struct snmp_request *request)
                 heart_t *heart_msg = (heart_t *)vb.value;
                 if (ip4_addr_cmp(request->source_ip, &omc)) {
                     ram_params.timestamp = PP_HTONL(heart_msg->timestamp);
-                    CARD_DEBUGF(SNMP_DEBUG, ("Got timestamp = 0x%"X32_F"\n", ram_params.timestamp));
+                    LOG_D("Got OMC Server timestamp = %d", ram_params.timestamp);
+                } else if (ip4_addr_cmp(request->source_ip, sn)) {
+                    last_rev_sn_ht_time = now;
+                    //LOG_I("Got SN Server timestampe = %d", PP_HTONL(heart_msg->timestamp));
+                    LED1_GREEN_ON;
                 }
             }
         } 
+    }
+
+    if ((now - last_rev_sn_ht_time) > 11000)
+    {
+        LED1_RED_ON;
     }
 }
 
@@ -707,6 +831,8 @@ static void snmp_8ke1_receive(struct netconn *handle, struct pbuf *p, const ip_a
     if (request.outbound_pbuf != NULL) {
         pbuf_free(request.outbound_pbuf);
     }
+
+    softreset();
 }
 
 static void snmp_netconn_thread(void *arg)
@@ -723,8 +849,9 @@ static void snmp_netconn_thread(void *arg)
 
   snmp_8ke1_traps_handle = conn;
     
-  setup_trap_msg();
-
+  //period_10s_proc(NULL);
+  LOG_I("SNMP thread start!");
+    
   do {
     err = netconn_recv(conn, &buf);
 
@@ -738,6 +865,32 @@ static void snmp_netconn_thread(void *arg)
   } while (1);
 }
 
+static void trap_var_init(void)
+{
+    hb_msg_init();
+
+    memset(&trap_var, 0, sizeof(struct snmp_varbind));
+
+    trap_var.type = SNMP_ASN1_TYPE_OCTET_STRING;
+    snmp_oid_assign(&trap_var.oid, snmp_8ke1_enterprise_oid->id, snmp_8ke1_enterprise_oid->len);
+    trap_var.value_len = sizeof(card_heart_t);
+    trap_var.value = (void *)&hb_msg;
+}
+
+
+static void mtp2_trap_var_init(void)
+{
+    mtp2_heart_msg_init();
+    memset(&mtp2_trap_var, 0, sizeof(struct snmp_varbind));
+
+    mtp2_trap_var.type = SNMP_ASN1_TYPE_OCTET_STRING;
+    snmp_oid_assign(&mtp2_trap_var.oid, snmp_8ke1_mtp2_oid->id, snmp_8ke1_mtp2_oid->len);
+    mtp2_trap_var.value_len = sizeof(mtp2_heart_t);
+    mtp2_trap_var.value = (void *)&mtp2_heart_msg;
+}
+
+#define SNMP_CARD_STACK_SIZE    350*4
+
 void snmp_8ke1_init(void)
 {   
     IP4_ADDR(&sn0, 172, 18, 98, 1);
@@ -748,18 +901,12 @@ void snmp_8ke1_init(void)
     ip4_addr_copy(trap_dst[1].dip, sn1);
     ip4_addr_copy(trap_dst[2].dip, omc);
 
-    if (plat_no) {   //plat 1
-        trap_dst[1].enable = 1;
-        trap_dst[0].enable = 0;
-    } else {
-        trap_dst[1].enable = 0;
-        trap_dst[0].enable = 1;
-    }
+    trap_var_init();
+    mtp2_trap_var_init();
 
-    trap_dst[2].enable = 1;
-
-    sys_thread_new("snmp_netconn", snmp_netconn_thread, NULL, SNMP_STACK_SIZE, osPriorityNormal);
+    sys_thread_new("snmp_netconn", snmp_netconn_thread, NULL, SNMP_CARD_STACK_SIZE, osPriorityNormal);
 }
+
 
 err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
 {
@@ -771,12 +918,13 @@ err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
     u16_t i, tot_len;
     err_t err = ERR_OK;
 
+    if (snmp_8ke1_traps_handle == NULL) {
+        return ERR_RTE;
+    }
+    
     trap_msg.snmp_version = SNMP_VERSION_2c;
     trap_msg.request_id = request_id++;
     trap_msg.error_index = trap_msg.error_status = 0;
-    
-    //for test
-    trap_dst[0].enable = 0;
     
     for ( i = 0, td = &trap_dst[0]; i < SNMP_8KE1_TRAP_DESTINATIONS; i++, td++) {
         if ((td->enable != 0) && !ip_addr_isany(&td->dip)) {
@@ -800,6 +948,7 @@ err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
 
                     /** send to the TRAP destination */
                     snmp_sendto(snmp_8ke1_traps_handle, p, &td->dip, SNMP_UDP_PORT);
+                    
                     pbuf_free(p);
                 } else {
                     err = ERR_MEM;
@@ -812,32 +961,35 @@ err_t snmp_send_8ke1_trap(struct snmp_varbind *varbinds)
     return err;
 }
 
-static void setup_trap_msg(void)
+void send_trap_msg(u8_t dst_flag)
 {
-    struct snmp_varbind var;
-    heart_t h_msg;
-    
-    memset(&var, 0, sizeof(struct snmp_varbind));
-    var.type = SNMP_ASN1_TYPE_OCTET_STRING;
-    memcpy((void *)var.oid.id, snmp_8ke1_enterprise_oid->id, snmp_8ke1_enterprise_oid->len * sizeof(u32_t));
-    var.oid.len = snmp_8ke1_enterprise_oid->len;
-    var.value_len = sizeof(heart_t);
-    
-    ram_params.timestamp = HAL_GetTick();
-    h_msg.sys_id = plat_no;
-    h_msg.subsys_id = card_id & 0x0F;
-    h_msg.length = 0;
-    h_msg.timestamp = PP_HTONL(ram_params.timestamp);
-    h_msg.alarm_code = 1;
-    h_msg.component_id = 0x2;
-    h_msg.length = 0;
-    h_msg.info = NULL;
-    memset(h_msg.led_color, 0xEE, 8);
-    
-    var.value = (void *)&h_msg;
-    
-    snmp_send_8ke1_trap(&var);
+    dst_flag &= 3;
+
+    for (u8_t i = 0; i < 3; i++) {
+        if (i == dst_flag) {
+            trap_dst[i].enable = 1;
+        } else {
+            trap_dst[i].enable = 0;
+        }
+    }
+    snmp_send_8ke1_trap(&trap_var);
 }
+
+void send_mtp2_trap_msg(u8_t dst_flag)
+{
+    dst_flag &= 3;
+    for (int i = 0; i < 3; i++)
+    {
+        if (i == dst_flag) {
+            trap_dst[i].enable = 1;
+        } else {
+            trap_dst[i].enable = 0;
+        }
+    }
+    
+    snmp_send_8ke1_trap(&mtp2_trap_var);
+}
+
 
 static u16_t
 snmp_trap_varbind_sum(struct snmp_msg_trap *trap, struct snmp_varbind *varbinds)

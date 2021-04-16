@@ -3,13 +3,15 @@
 #define CARD_DEBUG_H
 
 #include "lwip/arch.h"
+#include "shell.h"
+#include "usart.h"
 
 #define NET_DEBUG       1
 
-#define CARD_PLATFORM_ASSERT(x)  do { printf("Assertion \"%s\" failed at line %d in %s\n", \
+#define CARD_PLATFORM_ASSERT(x)  do { card_printf("Assertion \"%s\" failed at line %d in %s\n", \
                                         x, __LINE__, __FILE__); } while(0)
 
-#define CARD_PLATFORM_DIAG(x)  do { printf x; } while(0)
+#define CARD_PLATFORM_DIAG(x)  do { card_printf x; } while(0)
 
 #ifndef CARD_NOASSERT
 #define CARD_ASSERT(message, assertion) do { if (!(assertion)) { \
