@@ -15,8 +15,11 @@
 #include "zl50020.h"
 #include "eeprom.h"
 
-//#include "lffifo.h"
+#define LOG_TAG              "telnet"
+#define LOG_LVL              LOG_LVL_DBG
 #include "ulog.h"
+
+extern uint8_t card_id;
 
 Shell shell;
 char shellBuffer[512];
@@ -31,6 +34,13 @@ void telnetShellWrite(char data)
 {
     if (telnet_conn != NULL) {
         netconn_write(telnet_conn, (const void *)&data, 1, NETCONN_NOCOPY);
+    }
+}
+
+void telnetShellWriteString(const char *str)
+{
+    if (telnet_conn != NULL) {
+        netconn_write(telnet_conn, (const void *)str, strlen(str), NETCONN_NOCOPY);
     }
 }
 
@@ -64,6 +74,7 @@ start:
 void userShellInit(void)
 {
     shell.write = telnetShellWrite;
+    shell.write_str = telnetShellWriteString;
     //shell.read = telnetShellRead;
     shellInit(&shell, shellBuffer, 512);
 }
@@ -155,3 +166,12 @@ void update_software(void)
 }
 
 SHELL_EXPORT_CMD(SHELL_CMD_PERMISSION(0)|SHELL_CMD_TYPE(SHELL_TYPE_CMD_FUNC), update, update_software, update 8Ke1 software);
+
+#pragma  diag_suppress 870
+
+void show_card_id(void)
+{
+    LOG_W("当前的8KE1板的卡号=%d", card_id);
+}
+
+SHELL_EXPORT_CMD(SHELL_CMD_PERMISSION(0)|SHELL_CMD_TYPE(SHELL_TYPE_CMD_FUNC), info, show_card_id, show card id);

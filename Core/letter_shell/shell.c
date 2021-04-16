@@ -14,7 +14,6 @@
 #include "stdarg.h"
 #include "shell_ext.h"
 
-
 #if SHELL_USING_CMD_EXPORT == 1
 /**
  * @brief 默认用户
@@ -274,14 +273,18 @@ static void shellWriteByte(Shell *shell, const char data)
  */
 unsigned short shellWriteString(Shell *shell, const char *string)
 {
-    unsigned short count = 0;
-    SHELL_ASSERT(shell->write, return 0);
+    //unsigned short count = 0;
+    SHELL_ASSERT(shell->write_str, return 0);
+    shell->write_str(string);
+    return strlen(string);
+#if 0
     while(*string)
     {
         shell->write(*string ++);
         count ++;
     }
     return count;
+#endif
 }
 
 
@@ -295,8 +298,10 @@ unsigned short shellWriteString(Shell *shell, const char *string)
  */
 static unsigned short shellWriteCommandDesc(Shell *shell, const char *string)
 {
-    unsigned short count = 0;
-    SHELL_ASSERT(shell->write, return 0);
+    unsigned short count = strlen(string);
+    SHELL_ASSERT(shell->write_str, return 0);
+    shell->write_str(string);
+#if 0
     while(*string
         && *string != '\r'
         && *string != '\n'
@@ -311,7 +316,9 @@ static unsigned short shellWriteCommandDesc(Shell *shell, const char *string)
             shell->write('.');
         }
     }
+#endif
     return count;
+
 }
 
 

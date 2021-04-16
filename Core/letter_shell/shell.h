@@ -342,6 +342,7 @@ typedef struct shell_def
     } status;
     signed char (*read)(char *);                                /**< shell读函数 */
     void (*write)(const char);                                  /**< shell写函数 */
+    void (*write_str)(const char *);
 } Shell;
 
 

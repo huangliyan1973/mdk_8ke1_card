@@ -4,6 +4,11 @@
         "cstring": "c",
         "ds26518.h": "c",
         "zl50020.h": "c",
-        "sched.h": "c"
+        "sched.h": "c",
+        "*.rh": "c",
+        "compare": "c",
+        "xmemory": "c",
+        "xstddef": "c",
+        "xutility": "c"
     }
 }

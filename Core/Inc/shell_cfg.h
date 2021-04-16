@@ -19,7 +19,7 @@
  *        使能此宏，则`shellTask()`函数会一直循环读取输入，一般使用操作系统建立shell
  *        任务时使能此宏，关闭此宏的情况下，一般适用于无操作系统，在主循环中调用`shellTask()`
  */
-#define     SHELL_TASK_WHILE            1
+#define     SHELL_TASK_WHILE            0
 
 /**
  * @brief 是否使用命令导出方式
@@ -37,7 +37,7 @@
 /**
  * @brief 支持shell尾行模式
  */
-#define     SHELL_SUPPORT_END_LINE      1
+#define     SHELL_SUPPORT_END_LINE      0
 
 /**
  * @brief 是否在输出命令列表中列出用户
@@ -52,7 +52,7 @@
 /**
  * @brief 是否在输出命令列表中列出按键
  */
-#define     SHELL_HELP_LIST_KEY         0
+#define     SHELL_HELP_LIST_KEY         1
 
 /**
  * @brief 是否在输出命令列表中展示命令权限
@@ -63,19 +63,19 @@
  * @brief 使用LF作为命令行回车触发
  *        可以和SHELL_ENTER_CR同时开启
  */
-#define     SHELL_ENTER_LF              1
+#define     SHELL_ENTER_LF              0
 
 /**
  * @brief 使用CR作为命令行回车触发
  *        可以和SHELL_ENTER_LF同时开启
  */
-#define     SHELL_ENTER_CR              1
+#define     SHELL_ENTER_CR              0
 
 /**
  * @brief 使用CRLF作为命令行回车触发
  *        不可以和SHELL_ENTER_LF或SHELL_ENTER_CR同时开启
  */
-#define     SHELL_ENTER_CRLF            0
+#define     SHELL_ENTER_CRLF            1
 
 /**
  * @brief 使用执行未导出函数的功能
