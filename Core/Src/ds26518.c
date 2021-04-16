@@ -138,7 +138,6 @@ void read_rx_abcd(int e1_no, u8_t *rv_abcd)
 {
 	FRAMER *f = ds26518_framer(e1_no);
 	u8_t value;
-    //u8_t flag = 0;
 	
 	for (int i = 1; i < MAX_E1_TIMESLOTS / 2; i++) {
 		value = f->rs[i];
@@ -146,16 +145,11 @@ void read_rx_abcd(int e1_no, u8_t *rv_abcd)
 		*(rv_abcd + i + 16) = (value & 0x0f);
 	}
     
-//    if (flag) {
-//        LOG_HEX("rx-abcd", 16, rv_abcd, 32);
-//    }
 }
 
 void out_tx_abcd(int e1_no, u8_t slot, u8_t value)
 {
 	FRAMER *f = ds26518_framer(e1_no);
-
-	//u8_t old_value = f->ts[slot & 0x10];
 
 	if (slot == 0 || slot == 0x10) {
 		return;
@@ -172,9 +166,10 @@ void out_tx_abcd(int e1_no, u8_t slot, u8_t value)
 	}
 
 	f->ts[index] = bits;
-
+#if 0
 	LOG_I("'%d' E1 '%d' slot SET line code is %02x, ts value=%02x", 
         e1_no, slot, value, f->ts[index]);
+#endif
 }
 
 u8_t read_liu_status(int e1_no)
@@ -221,11 +216,9 @@ char *get_lrsr_value(u8_t lrsl)
 /* >0 mean liu has some problem */
 u8_t check_liu_status(int e1_no)
 {
-	//static u8_t lrsl[E1_PORT_PER_CARD];
 
 	LIU *l = ds26518_liu(e1_no);
 	u8_t llsr = l->llsr;
-	//u8_t lrsl_value = l->lrsl;
 	u8_t lrsr = l->lrsr;
 
 	if (llsr & 1){
@@ -251,7 +244,6 @@ u8_t check_liu_status(int e1_no)
 	if (llsr & 0x40){
 		LOG_W("Open-Circuit Clear (OCC) on %d LINK\r\n", e1_no);
 	}
-	//l->llsr = llsr;
 #if 0
 	if (lrsl[e1_no] != lrsl_value && lrsl_value > 0) {
 		LOG_I("LIU Receive signal Level = %s on %d LINK\r\n", get_lrsr_value(lrsl_value), e1_no);

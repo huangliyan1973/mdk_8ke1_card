@@ -140,9 +140,9 @@ int main(void)
 
   ds26518_test();
 
-  zl50020_test();
-  
-  module_test();  
+  module_test();
+
+  zl50020_test();   
     
   init_eeprom();
 

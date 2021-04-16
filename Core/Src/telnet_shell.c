@@ -77,8 +77,6 @@ static void shell_main(struct netconn *conn)
     do {
         ret = netconn_recv_tcp_pbuf(conn, &p);
         if (ret == ERR_OK) {
-            //lffifo_put(telnet_rev_buf, (u8_t *)p->payload, p->tot_len);
-            netconn_write(conn, (const void *)p->payload, p->tot_len, NETCONN_NOCOPY);
             data = (u8_t *)p->payload;
             for(int i = 0; i < p->tot_len; i++) {               
                 shellHandler(&shell, data[i]);
