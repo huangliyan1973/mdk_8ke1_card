@@ -128,6 +128,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
   if ((card_id & 0xf) == 0) {
     ds26518_global_init();
+  }else {
+    HAL_Delay(500);
   }
 
   check_master_clk();
@@ -140,9 +142,9 @@ int main(void)
 
   ds26518_test();
 
-  conf_module_detect();
+  conf_module_detect(); 
 
-  zl50020_test();   
+  zl50020_test();    
 
   mfc_module_detect();
     

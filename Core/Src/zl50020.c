@@ -707,7 +707,7 @@ void m34116_disconnect(u8_t slot)
     CONF_CONTROL = 0xf;
     delay_us(100);
 
-    LOG_I("m34116 '%x' slot dismiss conference, register value=%x", slot, m34116_status(slot));
+    //LOG_I("m34116 '%x' slot dismiss conference, register value=%x", slot, m34116_status(slot));
 
 }
 
@@ -829,13 +829,22 @@ u8_t read_dtmf(u8_t slot)
     return data[slot & 0x1F];
 }
 
+static void dismiss_all_conf(void)
+{
+    for (int i = 0; i < MAX_E1_TIMESLOTS; i++)
+    {
+        m34116_disconnect(i);
+    }
+}
+
 void conf_module_detect(void)
 {
     m34116_mode();
     m34116_conf_connect(10, 0, 2, 0, 0, 1, 1, 0);
     if (m34116_status(1) == 10) {
-        m34116_disconnect(10);
+        m34116_disconnect(1);
         ram_params.conf_module_installed = 1;
+        dismiss_all_conf();
         LOG_I("CONF MODULE INSTALLED!");
     } else {
         ram_params.conf_module_installed = 0;
