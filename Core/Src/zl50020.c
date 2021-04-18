@@ -904,12 +904,11 @@ u8_t mfc_t32_zl50020_test(u8_t test_value)
     int test_ok = 1;
     
     /* t32负责放A1-A7， mfc负责解码，zl50020负责连接时隙 */
-    /**
+    
     if (!zl50020_inited) {
         zl50020_init();
     }
-    **/
-    //connect_slot(0, TONE_E1, test_value, TONE_E1);
+
     cml->sto_connect[MFC_STREAM][0] = (MODULE_START_STREAM << 9) | (((test_value & 0xf) + TONE_START_SLOT) << 1);
     HAL_Delay(100);
     u8_t read_value = read_dtmf(0);
@@ -919,6 +918,7 @@ u8_t mfc_t32_zl50020_test(u8_t test_value)
         test_ok = 0;
     }
    
+    connect_slot(0, MFC_STREAM, TONE_SILENT,TONE_E1);
 
     return test_ok;   
 }
@@ -927,8 +927,7 @@ void mfc_module_detect(void)
 {
     u8_t mfc_installed = 0;
 
-    if (read_dtmf(0) == 0 && read_dtmf(16) == 0) {
-      if ((card_id & 0xf) == 0) {
+    if (read_dtmf(0) == 0 && read_dtmf(16) == 0 && read_dtmf(2) == 0) {
         for (int i = 0; i < 16; i++) {
             mfc_installed = mfc_t32_zl50020_test(i);
             
@@ -939,7 +938,6 @@ void mfc_module_detect(void)
             }
             
         }
-      }
         LOG_I("MFC MODULE INSTALLED!");
         ram_params.mfc_module_installed = 1;
 
